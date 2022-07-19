@@ -1,253 +1,173 @@
-#! /usr/bin/env python3
-
-from __future__ import division
-
-import os
 import argparse
-import tqdm
-import random
-import numpy as np
-
-from PIL import Image
-
-import torch
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-from torch.autograd import Variable
-
-from models import load_model
-from utils.utils import load_classes, rescale_boxes, non_max_suppression, print_environment_info
-from utils.datasets import ImageFolder
-from utils.transforms import Resize, DEFAULT_TRANSFORMS
-
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.ticker import NullLocator
+from sys import platform
+import cv2
+from models import *  # set ONNX_EXPORT in models.py
+from utils.datasets import *
+from utils.utils import *
 
 
-def detect_directory(model_path, weights_path, img_path, classes, output_path,
-                     batch_size=1, img_size=416, n_cpu=8, conf_thres=0.5, nms_thres=0.5):
-    """Detects objects on all images in specified directory and saves output images with drawn detections.
+def detect(save_txt=False, save_img=False):
+    img_size = (608, 352) if ONNX_EXPORT else opt.img_size  # (320, 192) or (416, 256) or (608, 352) for (height, width)
+    out, source, weights, half, view_img = opt.output, opt.source, opt.weights, opt.half, opt.view_img
+    webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
 
-    :param model_path: Path to model definition file (.cfg)
-    :type model_path: str
-    :param weights_path: Path to weights or checkpoint file (.weights or .pth)
-    :type weights_path: str
-    :param img_path: Path to directory with images to inference
-    :type img_path: str
-    :param classes: List of class names
-    :type classes: [str]
-    :param output_path: Path to output directory
-    :type output_path: str
-    :param batch_size: Size of each image batch, defaults to 8
-    :type batch_size: int, optional
-    :param img_size: Size of each image dimension for yolo, defaults to 416
-    :type img_size: int, optional
-    :param n_cpu: Number of cpu threads to use during batch generation, defaults to 8
-    :type n_cpu: int, optional
-    :param conf_thres: Object confidence threshold, defaults to 0.5
-    :type conf_thres: float, optional
-    :param nms_thres: IOU threshold for non-maximum suppression, defaults to 0.5
-    :type nms_thres: float, optional
-    """
-    dataloader = _create_data_loader(img_path, batch_size, img_size, n_cpu)
-    model = load_model(model_path, weights_path)
-    img_detections, imgs = detect(
-        model,
-        dataloader,
-        output_path,
-        conf_thres,
-        nms_thres)
-    _draw_and_save_output_images(
-        img_detections, imgs, img_size, output_path, classes)
+    # Initialize
+    device = torch_utils.select_device(device='cpu' if ONNX_EXPORT else opt.device)
+    if os.path.exists(out):
+        shutil.rmtree(out)  # delete output folder
+    os.makedirs(out)  # make new output folder
 
-    print(f"---- Detections were saved to: '{output_path}' ----")
+    # Initialize model
+    model = Darknet(opt.cfg, img_size)
 
+    # Load weights
+    attempt_download(weights)
+    if weights.endswith('.pt'):  # pytorch format
+        model.load_state_dict(torch.load(weights, map_location=device)['model'])
+    else:  # darknet format
+        _ = load_darknet_weights(model, weights)
 
+    # Second-stage classifier
+    classify = False
+    if classify:
+        modelc = torch_utils.load_classifier(name='resnet101', n=2)  # initialize
+        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model'])  # load weights
+        modelc.to(device).eval()
 
-def detect(model, dataloader, output_path, conf_thres, nms_thres):
-    """Inferences images with model.
+    # Fuse Conv2d + BatchNorm2d layers
+    # model.fuse()
 
-    :param model: Model for inference
-    :type model: models.Darknet
-    :param dataloader: Dataloader provides the batches of images to inference
-    :type dataloader: DataLoader
-    :param output_path: Path to output directory
-    :type output_path: str
-    :param conf_thres: Object confidence threshold, defaults to 0.5
-    :type conf_thres: float, optional
-    :param nms_thres: IOU threshold for non-maximum suppression, defaults to 0.5
-    :type nms_thres: float, optional
-    :return: List of detections. The coordinates are given for the padded image that is provided by the dataloader.
-        Use `utils.rescale_boxes` to transform them into the desired input image coordinate system before its transformed by the dataloader),
-        List of input image paths
-    :rtype: [Tensor], [str]
-    """
-    # Create output directory, if missing
-    os.makedirs(output_path, exist_ok=True)
+    # Eval mode
+    model.to(device).eval()
 
-    model.eval()  # Set model to evaluation mode
+    # Export mode
+    if ONNX_EXPORT:
+        img = torch.zeros((1, 3) + img_size)  # (1, 3, 320, 192)
+        torch.onnx.export(model, img, 'weights/export.onnx', verbose=False, opset_version=10)
 
-    Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+        # Validate exported model
+        import onnx
+        model = onnx.load('weights/export.onnx')  # Load the ONNX model
+        onnx.checker.check_model(model)  # Check that the IR is well formed
+        print(onnx.helper.printable_graph(model.graph))  # Print a human readable representation of the graph
+        return
 
-    img_detections = []  # Stores detections for each image index
-    imgs = []  # Stores image paths
+    # Half precision
+    half = half and device.type != 'cpu'  # half precision only supported on CUDA
+    if half:
+        model.half()
 
-    for (img_paths, input_imgs) in tqdm.tqdm(dataloader, desc="Detecting"):
-        # Configure input
-        input_imgs = Variable(input_imgs.type(Tensor), requires_grad=False)
+    # Set Dataloader
+    vid_path, vid_writer = None, None
+    if webcam:
+        view_img = True
+        torch.backends.cudnn.benchmark = True  # set True to speed up constant image size inference
+        dataset = LoadStreams(source, img_size=img_size, half=half)
+    else:
+        save_img = True
+        dataset = LoadImages(source, img_size=img_size, half=half)
+
+    # Get names and colors
+    names = load_classes(opt.names)
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(names))]
+
+    # Run inference
+    t0 = time.time()
+    for path, img, im0s, vid_cap in dataset:
+        t = time.time()
+
         # Get detections
-        with torch.no_grad():
-            outputs = model(input_imgs)
-            outputs = non_max_suppression(outputs, conf_thres=conf_thres, iou_thres=nms_thres)
-            # outputs -> boxes
+        img = torch.from_numpy(img).to(device)
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
+        pred = model(img)[0]
 
-        # Store image and detections
-        img_detections.extend(outputs)
-        imgs.extend(img_paths)
-    print(len(img_detections))
-    return img_detections, imgs
+        if opt.half:
+            pred = pred.float()
 
+        # Apply NMS
+        pred = non_max_suppression(pred, opt.conf_thres, opt.nms_thres)
 
-def _draw_and_save_output_images(img_detections, imgs, img_size, output_path, classes):
-    """Draws detections in output images and stores them.
+        # Apply
+        if classify:
+            pred = apply_classifier(pred, modelc, img, im0s)
 
-    :param img_detections: List of detections
-    :type img_detections: [Tensor]
-    :param imgs: List of paths to image files
-    :type imgs: [str]
-    :param img_size: Size of each image dimension for yolo
-    :type img_size: int
-    :param output_path: Path of output directory
-    :type output_path: str
-    :param classes: List of class names
-    :type classes: [str]
-    """
+        # Process detections
+        for i, det in enumerate(pred):  # detections per image
+            if webcam:  # batch_size >= 1
+                p, s, im0 = path[i], '%g: ' % i, im0s[i]
+            else:
+                p, s, im0 = path, '', im0s
 
-    # Iterate through images and save plot of detections
-    for (image_path, detections) in zip(imgs, img_detections):
+            save_path = str(Path(out) / Path(p).name)
+            s += '%gx%g ' % img.shape[2:]  # print string
+            if det is not None and len(det):
+                # Rescale boxes from img_size to im0 size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
-        print(f"Image {image_path}:")
-        _draw_and_save_output_image(
-            image_path, detections, img_size, output_path, classes)
+                # Print results
+                for c in det[:, -1].unique():
+                    n = (det[:, -1] == c).sum()  # detections per class
+                    s += '%g %ss, ' % (n, names[int(c)])  # add to string
 
+                # Write results
+                for *xyxy, conf, cls in det:
+                    if save_txt:  # Write to file
+                        with open(save_path + '.txt', 'a') as file:
+                            file.write(('%g ' * 6 + '\n') % (*xyxy, cls, conf))
 
-def _draw_and_save_output_image(image_path, detections, img_size, output_path, classes):
-    """Draws detections in output image and stores this.
+                    if save_img or view_img:  # Add bbox to image
+                        label = '%s %.2f' % (names[int(cls)], conf)
+                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
 
-    :param image_path: Path to input image
-    :type image_path: str
-    :param detections: List of detections on image
-    :type detections: [Tensor]
-    :param img_size: Size of each image dimension for yolo
-    :type img_size: int
-    :param output_path: Path of output directory
-    :type output_path: str
-    :param classes: List of class names
-    :type classes: [str]
-    """
-    # Create plot
-    img = np.array(Image.open(image_path))
-    plt.figure()
-    fig, ax = plt.subplots(1)
-    ax.imshow(img)
-    # Rescale boxes to original image
-    detections = rescale_boxes(detections, img_size, img.shape[:2])  # detection -> rescale
-    unique_labels = detections[:, -1].cpu().unique() #  label of each detection
-    n_cls_preds = len(unique_labels)
-    # Bounding-box colors
-    cmap = plt.get_cmap("tab20b")
-    colors = [cmap(i) for i in np.linspace(0, 1, n_cls_preds)]
-    bbox_colors = random.sample(colors, n_cls_preds)
-    for x1, y1, x2, y2, conf, cls_pred in detections:
+            print('%sDone. (%.3fs)' % (s, time.time() - t))
 
-        print(f"\t+ Label: {classes[int(cls_pred)]} | Confidence: {conf.item():0.4f}")
+            # Stream results
+            if view_img:
+                cv2.imshow(p, im0)
+                if cv2.waitKey(1) == ord('q'):  # q to quit
+                    raise StopIteration
 
-        box_w = x2 - x1
-        box_h = y2 - y1
+            # Save results (image with detections)
+            if save_img:
+                if dataset.mode == 'images':
+                    cv2.imwrite(save_path, im0)
+                else:
+                    if vid_path != save_path:  # new video
+                        vid_path = save_path
+                        if isinstance(vid_writer, cv2.VideoWriter):
+                            vid_writer.release()  # release previous video writer
 
-        color = bbox_colors[int(np.where(unique_labels == int(cls_pred))[0])]
-        # Create a Rectangle patch
-        bbox = patches.Rectangle((x1, y1), box_w, box_h, linewidth=2, edgecolor=color, facecolor="none")
-        # Add the bbox to the plot
-        ax.add_patch(bbox)
-        # Add label
-        plt.text(
-            x1,
-            y1,
-            s=classes[int(cls_pred)],
-            color="white",
-            verticalalignment="top",
-            bbox={"color": color, "pad": 0})
+                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*opt.fourcc), fps, (w, h))
+                    vid_writer.write(im0)
 
-    # Save generated image with detections
-    plt.axis("off")
-    plt.gca().xaxis.set_major_locator(NullLocator())
-    plt.gca().yaxis.set_major_locator(NullLocator())
-    filename = os.path.basename(image_path).split(".")[0]
-    output_path = os.path.join(output_path, f"{filename}.png")
-    plt.savefig(output_path, bbox_inches="tight", pad_inches=0.0)
-    plt.close()
+    if save_txt or save_img:
+        print('Results saved to %s' % os.getcwd() + os.sep + out)
+        if platform == 'darwin':  # MacOS
+            os.system('open ' + out + ' ' + save_path)
 
-
-def _create_data_loader(img_path, batch_size, img_size, n_cpu):
-    """Creates a DataLoader for inferencing.
-
-    :param img_path: Path to file containing all paths to validation images.
-    :type img_path: str
-    :param batch_size: Size of each image batch
-    :type batch_size: int
-    :param img_size: Size of each image dimension for yolo
-    :type img_size: int
-    :param n_cpu: Number of cpu threads to use during batch generation
-    :type n_cpu: int
-    :return: Returns DataLoader
-    :rtype: DataLoader
-    """
-    dataset = ImageFolder(
-        img_path,
-        transform=transforms.Compose([DEFAULT_TRANSFORMS, Resize(img_size)]))
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=n_cpu,
-        pin_memory=True)
-    return dataloader
-
-
-def run():
-    print_environment_info()
-    parser = argparse.ArgumentParser(description="Detect objects on images.")
-    parser.add_argument("-m", "--model", type=str, default="config/yolov3.cfg", help="Path to model definition file (.cfg)")
-    parser.add_argument("-w", "--weights", type=str, default="weights/yolov3.weights", help="Path to weights or checkpoint file (.weights or .pth)")
-    parser.add_argument("-i", "--images", type=str, default="data/samples", help="Path to directory with images to inference")
-    parser.add_argument("-c", "--classes", type=str, default="data/coco.names", help="Path to classes label file (.names)")
-    parser.add_argument("-o", "--output", type=str, default="output", help="Path to output directory")
-    parser.add_argument("-b", "--batch_size", type=int, default=1, help="Size of each image batch")
-    parser.add_argument("--img_size", type=int, default=416, help="Size of each image dimension for yolo")
-    parser.add_argument("--n_cpu", type=int, default=8, help="Number of cpu threads to use during batch generation")
-    parser.add_argument("--conf_thres", type=float, default=0.6, help="Object confidence threshold")
-    parser.add_argument("--nms_thres", type=float, default=0.4, help="IOU threshold for non-maximum suppression")
-    args = parser.parse_args()
-    print(f"Command line arguments: {args}")
-
-    # Extract class names from file
-    classes = load_classes(args.classes)  # List of class names
-
-    detect_directory(
-        args.model,
-        args.weights,
-        args.images,
-        classes,
-        args.output,
-        batch_size=args.batch_size,
-        img_size=args.img_size,
-        n_cpu=args.n_cpu,
-        conf_thres=args.conf_thres,
-        nms_thres=args.nms_thres)
+    print('Done. (%.3fs)' % (time.time() - t0))
 
 
 if __name__ == '__main__':
-    run()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='*.cfg path')
+    parser.add_argument('--names', type=str, default='data/coco.names', help='*.names path')
+    parser.add_argument('--weights', type=str, default='weights/yolov3-spp.weights', help='path to weights file')
+    parser.add_argument('--source', type=str, default='data/samples', help='source')  # input file/folder, 0 for webcam
+    parser.add_argument('--output', type=str, default='output', help='output folder')  # output folder
+    parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
+    parser.add_argument('--conf-thres', type=float, default=0.1, help='object confidence threshold')
+    parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
+    parser.add_argument('--fourcc', type=str, default='mp4v', help='output video codec (verify ffmpeg support)')
+    parser.add_argument('--half', action='store_true', help='half precision FP16 inference')
+    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
+    parser.add_argument('--view-img', action='store_true', help='display results')
+    opt = parser.parse_args()
+    print(opt)
+
+    with torch.no_grad():
+        detect()
