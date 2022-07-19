@@ -41,6 +41,9 @@ def make_data_file(root_dir, default_oid_dir, domain_dict):
             f.write('train=' + train_txt_path + '\n')
             f.write('valid=' + valid_txt_path + '\n')
             f.write('names=' + names + '\n')
+            f.write('backup= backup/' + '\n')
+            f.write('eval=coco' + '\n')
+
 
 
 def get_domain_group(DEFAULT_DATA_DIR, domain):

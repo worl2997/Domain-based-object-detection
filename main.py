@@ -25,5 +25,5 @@ if __name__ == '__main__':
         else:
             # custom된 cfg 파일이 없을경우, 학습하고자 하는 모델의 custom cfg 파일을 만들어줌
             model_cfg = get_custom_cfg(path.cfg_path, args.domain, args.model, args.classes)
-        train(args, model_cfg, path)
+        train_model(args, model_cfg, path)
 

@@ -3,6 +3,7 @@ import argparse
 import torch.distributed as dist
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
+from utils.parse_config import parse_data_cfg
 
 import test  # import test.py to get mAP after each epoch
 from models import *
@@ -15,12 +16,8 @@ try:  # Mixed precision training https://github.com/NVIDIA/apex
 except:
     mixed_precision = False  # not installed
 
-wdir = 'weights' + os.sep  # weights dir
-last = wdir + 'last.pt'
-best = wdir + 'best.pt'
-results_file = 'results.txt'
 
-# Hyperparameters (results68: 59.2 mAP@0.5 yolov3-spp-416) https://github.com/ultralytics/yolov3/issues/310
+
 
 hyp = {'giou': 3.54,  # giou loss gain
        'cls': 37.4,  # cls loss gain
@@ -49,29 +46,36 @@ if f:
         hyp[k] = v
 
 
-def train():
-    cfg = opt.cfg
-    data = opt.data
-    img_size = opt.img_size
-    epochs = 1 if opt.prebias else opt.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
-    batch_size = opt.batch_size
-    accumulate = opt.accumulate  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    weights = opt.weights  # initial training weights
+def train(args,model_cfg, device, tb_writer, path):
+    wdir =  os.path.join(path.model_save_path, args.domain)
+    last = wdir + 'last.pt'
+    best = wdir + 'best.pt'
+    results_file = 'results.txt'
 
-    if 'pw' not in opt.arc:  # remove BCELoss positive weights
+    cfg = model_cfg
+    img_size = args.img_size
+    epochs = 1 if args.prebias else args.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
+    batch_size = args.batch_size
+    accumulate = args.accumulate  # effective bs = batch_size * accumulate = 16 * 4 = 64
+    weights = args.weights  # initial training weights
+
+    data = os.path.join(path.DATA_FILE_DIR, args.domain + '.data')  # args.data
+    data_dict = parse_data_cfg(data)
+
+
+    if 'pw' not in args.arc:  # remove BCELoss positive weights
         hyp['cls_pw'] = 1.
         hyp['obj_pw'] = 1.
 
     # Initialize
     init_seeds()
-    if opt.multi_scale:
+    if args.multi_scale:
         img_sz_min = round(img_size / 32 / 1.5)
         img_sz_max = round(img_size / 32 * 1.5)
         img_size = img_sz_max * 32  # initiate with maximum multi_scale size
         print('Using multi-scale %g - %g' % (img_sz_min * 32, img_size))
 
     # Configure run
-    data_dict = parse_data_cfg(data)
     train_path = data_dict['train']
 
     test_path = data_dict['valid']
@@ -82,7 +86,7 @@ def train():
         os.remove(f)
 
     # Initialize model
-    model = Darknet(cfg, arc=opt.arc).to(device)
+    model = Darknet(cfg, arc=args.arc).to(device)
 
     # Optimizer
     pg0, pg1 = [], []  # optimizer parameter groups
@@ -92,7 +96,7 @@ def train():
         else:
             pg0 += [v]  # parameter group 0
 
-    if opt.adam:
+    if args.adam:
         optimizer = optim.Adam(pg0, lr=hyp['lr0'])
         # optimizer = AdaBound(pg0, lr=hyp['lr0'], final_lr=0.1)
     else:
@@ -100,60 +104,61 @@ def train():
     optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
     del pg0, pg1
 
-    # https://github.com/alphadl/lookahead.pytorch
     # optimizer = torch_utils.Lookahead(optimizer, k=5, alpha=0.5)
 
     cutoff = -1  # backbone reaches to cutoff layer
     start_epoch = 0
     best_fitness = float('inf')
-    attempt_download(weights)
-    if weights.endswith('.pt'):  # pytorch format
-        # possible weights are '*.pt', 'yolov3-spp.pt', 'yolov3-tiny.pt' etc.
-        chkpt = torch.load(weights, map_location=device)
+    if weights:
+        attempt_download(weights)
 
-        # load model
-        try:
-            chkpt['model'] = {k: v for k, v in chkpt['model'].items() if model.state_dict()[k].numel() == v.numel()}
-            model.load_state_dict(chkpt['model'], strict=False)
-        except KeyError as e:
-            s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s. " \
-                "See https://github.com/ultralytics/yolov3/issues/657" % (opt.weights, opt.cfg, opt.weights)
-            raise KeyError(s) from e
+        if weights.endswith('.pt'):  # pytorch format
+            # possible weights are '*.pt', 'yolov3-spp.pt', 'yolov3-tiny.pt' etc.
+            chkpt = torch.load(weights, map_location=device)
 
-        # load optimizer
-        if chkpt['optimizer'] is not None:
-            optimizer.load_state_dict(chkpt['optimizer'])
-            best_fitness = chkpt['best_fitness']
+            # load model
+            try:
+                chkpt['model'] = {k: v for k, v in chkpt['model'].items() if model.state_dict()[k].numel() == v.numel()}
+                model.load_state_dict(chkpt['model'], strict=False)
+            except KeyError as e:
+                s = "%s is not compatible with %s. Specify --weights '' or specify a --cfg compatible with %s. " \
+                    "See https://github.com/ultralytics/yolov3/issues/657" % (args.weights, args.cfg, args.weights)
+                raise KeyError(s) from e
 
-        # load results
-        if chkpt.get('training_results') is not None:
-            with open(results_file, 'w') as file:
-                file.write(chkpt['training_results'])  # write results.txt
+            # load optimizer
+            if chkpt['optimizer'] is not None:
+                optimizer.load_state_dict(chkpt['optimizer'])
+                best_fitness = chkpt['best_fitness']
 
-        start_epoch = chkpt['epoch'] + 1
-        del chkpt
+            # load results
+            if chkpt.get('training_results') is not None:
+                with open(results_file, 'w') as file:
+                    file.write(chkpt['training_results'])  # write results.txt
 
-    elif len(weights) > 0:  # darknet format
-        # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
-        cutoff = load_darknet_weights(model, weights)
+            start_epoch = chkpt['epoch'] + 1
+            del chkpt
 
-    if opt.transfer or opt.prebias:  # transfer learning edge (yolo) layers
-        nf = int(model.module_defs[model.yolo_layers[0] - 1]['filters'])  # yolo layer size (i.e. 255)
+        elif len(weights) > 0:  # darknet format
+            # possible weights are '*.weights', 'yolov3-tiny.conv.15',  'darknet53.conv.74' etc.
+            cutoff = load_darknet_weights(model, weights)
 
-        if opt.prebias:
-            for p in optimizer.param_groups:
-                # lower param count allows more aggressive training settings: i.e. SGD ~0.1 lr0, ~0.9 momentum
-                p['lr'] *= 100  # lr gain
-                if p.get('momentum') is not None:  # for SGD but not Adam
-                    p['momentum'] *= 0.9
+        if args.transfer or args.prebias:  # transfer learning edge (yolo) layers
+            nf = int(model.module_defs[model.yolo_layers[0] - 1]['filters'])  # yolo layer size (i.e. 255)
 
-        for p in model.parameters():
-            if opt.prebias and p.numel() == nf:  # train (yolo biases)
-                p.requires_grad = True
-            elif opt.transfer and p.shape[0] == nf:  # train (yolo biases+weights)
-                p.requires_grad = True
-            else:  # freeze layer
-                p.requires_grad = False
+            if args.prebias:
+                for p in optimizer.param_groups:
+                    # lower param count allows more aggressive training settings: i.e. SGD ~0.1 lr0, ~0.9 momentum
+                    p['lr'] *= 100  # lr gain
+                    if p.get('momentum') is not None:  # for SGD but not Adam
+                        p['momentum'] *= 0.9
+
+            for p in model.parameters():
+                if args.prebias and p.numel() == nf:  # train (yolo biases)
+                    p.requires_grad = True
+                elif args.transfer and p.shape[0] == nf:  # train (yolo biases+weights)
+                    p.requires_grad = True
+                else:  # freeze layer
+                    p.requires_grad = False
 
     # Scheduler https://github.com/ultralytics/yolov3/issues/238
     # lf = lambda x: 1 - x / epochs  # linear ramp to zero
@@ -161,7 +166,7 @@ def train():
     # lf = lambda x: 1 - 10 ** (hyp['lrf'] * (1 - x / epochs))  # inverse exp ramp
     # scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
     # scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=range(59, 70, 1), gamma=0.8)  # gradual fall to 0.1*lr0
-    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(opt.epochs * x) for x in [0.8, 0.9]], gamma=0.1)
+    scheduler = lr_scheduler.MultiStepLR(optimizer, milestones=[round(args.epochs * x) for x in [0.8, 0.9]], gamma=0.1)
     scheduler.last_epoch = start_epoch - 1
 
     # # Plot lr schedule
@@ -192,10 +197,10 @@ def train():
     dataset = LoadImagesAndLabels(train_path, img_size, batch_size,
                                   augment=True,
                                   hyp=hyp,  # augmentation hyperparameters
-                                  rect=opt.rect,  # rectangular training
-                                  image_weights=opt.img_weights,
+                                  rect=args.rect,  # rectangular training
+                                  image_weights=args.img_weights,
                                   cache_labels=epochs > 10,
-                                  cache_images=opt.cache_images and not opt.prebias)
+                                  cache_images=args.cache_images and not args.prebias)
 
     # Dataloader
     batch_size = min(batch_size, len(dataset))
@@ -203,17 +208,17 @@ def train():
     dataloader = torch.utils.data.DataLoader(dataset,
                                              batch_size=batch_size,
                                              num_workers=nw,
-                                             shuffle=not opt.rect,  # Shuffle=True unless rectangular training is used
+                                             shuffle=not args.rect,  # Shuffle=True unless rectangular training is used
                                              pin_memory=True,
                                              collate_fn=dataset.collate_fn)
 
     # Test Dataloader
-    if not opt.prebias:
-        testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, opt.img_size, batch_size,
+    if not args.prebias:
+        testloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path, args.img_size, batch_size,
                                                                      hyp=hyp,
                                                                      rect=True,
                                                                      cache_labels=True,
-                                                                     cache_images=opt.cache_images),
+                                                                     cache_images=args.cache_images),
                                                  batch_size=batch_size,
                                                  num_workers=nw,
                                                  pin_memory=True,
@@ -222,7 +227,7 @@ def train():
     # Start training
     nb = len(dataloader)
     model.nc = nc  # attach number of classes to model
-    model.arc = opt.arc  # attach yolo architecture
+    model.arc = args.arc  # attach yolo architecture
     model.hyp = hyp  # attach hyperparameters to model
     model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)  # attach class weights
     maps = np.zeros(nc)  # mAP per class
@@ -231,7 +236,7 @@ def train():
     t0 = time.time()
     torch_utils.model_info(model, report='summary')  # 'full' or 'summary'
     print('Using %g dataloader workers' % nw)
-    print('Starting %s for %g epochs...' % ('prebias' if opt.prebias else 'training', epochs))
+    print('Starting %s for %g epochs...' % ('prebias' if args.prebias else 'training', epochs))
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
         model.train()
         print(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'GIoU', 'obj', 'cls', 'total', 'targets', 'img_size'))
@@ -257,7 +262,7 @@ def train():
             targets = targets.to(device)
 
             # Multi-Scale training
-            if opt.multi_scale:
+            if args.multi_scale:
                 if ni / accumulate % 10 == 0:  #  adjust (67% - 150%) every 10 batches
                     img_size = random.randrange(img_sz_min, img_sz_max + 1) * 32
                 sf = img_size / max(imgs.shape[2:])  # scale factor
@@ -321,14 +326,14 @@ def train():
 
         # Process epoch results
         final_epoch = epoch + 1 == epochs
-        if opt.prebias:
+        if args.prebias:
             print_model_biases(model)
-        elif not opt.notest or final_epoch:  # Calculate mAP
+        elif not args.notest or final_epoch:  # Calculate mAP
             is_coco = any([x in data for x in ['coco.data', 'coco2014.data', 'coco2017.data']]) and model.nc == 80
             results, maps = test.test(cfg,
                                       data,
                                       batch_size=batch_size,
-                                      img_size=opt.img_size,
+                                      img_size=args.img_size,
                                       model=model,
                                       conf_thres=0.001 if final_epoch else 0.1,  # 0.1 for speed
                                       save_json=final_epoch and is_coco,
@@ -337,8 +342,8 @@ def train():
         # Write epoch results
         with open(results_file, 'a') as f:
             f.write(s + '%10.3g' * 7 % results + '\n')  # P, R, mAP, F1, test_losses=(GIoU, obj, cls)
-        if len(opt.name) and opt.bucket and not opt.prebias:
-            os.system('gsutil cp results.txt gs://%s/results%s.txt' % (opt.bucket, opt.name))
+        if len(args.name) and args.bucket and not args.prebias:
+            os.system('gsutil cp results.txt gs://%s/results%s.txt' % (args.bucket, args.name))
 
         # Write Tensorboard results
         if tb_writer:
@@ -354,7 +359,7 @@ def train():
             best_fitness = fitness
 
         # Save training results
-        save = (not opt.nosave) or (final_epoch and not opt.evolve) or opt.prebias
+        save = (not args.nosave) or (final_epoch and not args.evolve) or args.prebias
         if save:
             with open(results_file, 'r') as f:
                 # Create checkpoint
@@ -382,15 +387,15 @@ def train():
         # end epoch ----------------------------------------------------------------------------------------------------
 
     # end training
-    if len(opt.name) and not opt.prebias:
-        fresults, flast, fbest = 'results%s.txt' % opt.name, 'last%s.pt' % opt.name, 'best%s.pt' % opt.name
+    if len(args.name) and not args.prebias:
+        fresults, flast, fbest = 'results%s.txt' % args.name, 'last%s.pt' % args.name, 'best%s.pt' % args.name
         os.rename('results.txt', fresults)
         os.rename(wdir + 'last.pt', wdir + flast) if os.path.exists(wdir + 'last.pt') else None
         os.rename(wdir + 'best.pt', wdir + fbest) if os.path.exists(wdir + 'best.pt') else None
 
         # save to cloud
-        if opt.bucket:
-            os.system('gsutil cp %s %s gs://%s' % (fresults, wdir + flast, opt.bucket))
+        if args.bucket:
+            os.system('gsutil cp %s %s gs://%s' % (fresults, wdir + flast, args.bucket))
 
     plot_results()  # save as results.png
     print('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))
@@ -400,71 +405,57 @@ def train():
     return results
 
 
-def prebias():
+def prebias(args,model_cfg, device, tb_writer, path):
     # trains output bias layers for 1 epoch and creates new backbone
-    if opt.prebias:
-        a = opt.img_weights  # save settings
-        opt.img_weights = False  # disable settings
+    if args.prebias:
+        wdir = os.path.join(path.model_save_path, args.domain)
+        last = wdir + 'last.pt'
 
-        train()  # transfer-learn yolo biases for 1 epoch
+        a = args.img_weights  # save settings
+        args.img_weights = False  # disable settings
+
+        train(args,model_cfg, device, tb_writer, path)  # transfer-learn yolo biases for 1 epoch
         create_backbone(last)  # saved results as backbone.pt
 
-        opt.weights = wdir + 'backbone.pt'  # assign backbone
-        opt.prebias = False  # disable prebias
-        opt.img_weights = a  # reset settings
+        args.weights = wdir + 'backbone.pt'  # assign backbone
+        args.prebias = False  # disable prebias
+        args.img_weights = a  # reset settings
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--epochs', type=int, default=273)  # 500200 batches at bs 16, 117263 images = 273 epochs
-    parser.add_argument('--batch-size', type=int, default=16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    parser.add_argument('--accumulate', type=int, default=2, help='batches to accumulate before optimizing')
-    parser.add_argument('--cfg', type=str, default='training/yolov3.cfg', help='*.cfg path')
-    parser.add_argument('--data', type=str, default='training/trainer.data', help='*.data path')
-    parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
-    parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
-    parser.add_argument('--rect', action='store_true', help='rectangular training')
-    parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
-    parser.add_argument('--transfer', action='store_true', help='transfer learning')
-    parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
-    parser.add_argument('--notest', action='store_true', help='only test final epoch')
-    parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
-    parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
-    parser.add_argument('--img-weights', action='store_true', help='select training images by weight')
-    parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
-    parser.add_argument('--weights', type=str, default='weights/yolov3-spp.weights', help='initial weights')
-    parser.add_argument('--arc', type=str, default='default', help='yolo architecture')  # defaultpw, uCE, uBCE
-    parser.add_argument('--prebias', action='store_true', help='transfer-learn yolo biases prior to training')
-    parser.add_argument('--name', default='', help='renames results.txt to results_name.txt if supplied')
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1 or cpu)')
-    parser.add_argument('--adam', action='store_true', help='use adam optimizer')
-    parser.add_argument('--var', type=float, help='debug variable')
-    opt = parser.parse_args()
-    opt.weights = last if opt.resume else opt.weights
-    print(opt)
-    device = torch_utils.select_device(opt.device, apex=mixed_precision, batch_size=opt.batch_size)
+def train_model(args, model_cfg, path):
+    wdir = os.path.join(path.model_save_path, args.domain)
+    last = wdir + 'last.pt'
+    args.weights = last if args.resume else args.weights
+
+    mixed_precision = True
+    try:  # Mixed precision training https://github.com/NVIDIA/apex
+        from apex import amp
+    except:
+        mixed_precision = False  # not installed
+
+    tb_writer = None
+    device = torch_utils.select_device(args.device, apex=mixed_precision, batch_size=args.batch_size)
     if device.type == 'cpu':
         mixed_precision = False
 
     # scale hyp['obj'] by img_size (evolved at 416)
-    hyp['obj'] *= opt.img_size / 416.
+    hyp['obj'] *= args.img_size / 416.
 
-    tb_writer = None
-    if not opt.evolve:  # Train normally
+    if not args.evolve:  # Train normally
         try:
             # Start Tensorboard with "tensorboard --logdir=runs", view at http://localhost:6006/
             from torch.utils.tensorboard import SummaryWriter
             tb_writer = SummaryWriter()
         except:
             pass
-        prebias()  # optional
-        train()  # train normally
+        prebias(args,model_cfg, device, tb_writer, path)  # optional
+        train(args,model_cfg, device, tb_writer, path)  # train normally
 
     else:  # Evolve hyperparameters (optional)
-        opt.notest = True  # only test final epoch
-        opt.nosave = True  # only save final checkpoint
-        if opt.bucket:
-            os.system('gsutil cp gs://%s/evolve.txt .' % opt.bucket)  # download evolve.txt if exists
+        args.notest = True  # only test final epoch
+        args.nosave = True  # only save final checkpoint
+        if args.bucket:
+            os.system('gsutil cp gs://%s/evolve.txt .' % args.bucket)  # download evolve.txt if exists
 
         for _ in range(1):  # generations to evolve
             if os.path.exists('evolve.txt'):  # if evolve.txt exists: select best hyps and mutate
@@ -496,11 +487,11 @@ if __name__ == '__main__':
                 hyp[k] = np.clip(hyp[k], v[0], v[1])
 
             # Train mutation
-            prebias()
-            results = train()
+            prebias(args, model_cfg, device, tb_writer, path)  # optional
+            results = train(args, model_cfg, device, tb_writer, path)
 
             # Write mutation results
-            print_mutation(hyp, results, opt.bucket)
+            print_mutation(hyp, results, args.bucket)
 
             # Plot results
             # plot_evolution_results(hyp)

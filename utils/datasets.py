@@ -254,10 +254,24 @@ class LoadStreams:  # multiple IP or RTSP cameras
     def __len__(self):
         return 0  # 1E12 frames = 32 streams at 30 FPS for 30 years
 
+def parse_label_data(img_list):
+    label = []
+    for file_path in img_list:
+        b = file_path.split('/')
+        file_name = b[-1].replace('.jpg', '.txt').replace(".png", ".txt")
+        new = b[:-1]
+        new.append('Label')
+        new.append(file_name)
+        label_path = '/'.join(new)
+        label.append(label_path)
+    return label
+
 
 class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_labels=False, cache_images=False):
+
+        #path -> train=/home/jacky/바탕화면/Domain-based-object-detection/data/custom/train/Highway/Highway_train.txt
         path = str(Path(path))  # os-agnostic
         assert os.path.isfile(path), 'File not found %s. See %s' % (path, help_url)
         with open(path, 'r') as f:
@@ -278,8 +292,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         self.rect = False if image_weights else rect
 
         # Define labels
-        self.label_files = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt')
-                            for x in self.img_files]
+        self.label_files = parse_label_data(self.img_files)
+
+        # self.label_files = [x.replace('images', 'labels').replace(os.path.splitext(x)[-1], '.txt')
+        #                     for x in self.img_files]
+
 
         # Rectangular Training  https://github.com/ultralytics/yolov3/issues/232
         if self.rect:
