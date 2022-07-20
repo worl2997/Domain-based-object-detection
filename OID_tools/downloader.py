@@ -3,7 +3,7 @@ from tqdm import tqdm
 from .utils import images_options
 from .utils import bcolors as bc
 from multiprocessing.dummy import Pool as ThreadPool
-
+import cv2
 
 def make_domain_list(domain_file_path, domain_list):
     # check the 'domain_file_path' whether it is exist or not
@@ -155,9 +155,16 @@ def get_label(folder, dataset_dir, class_name, class_code, df_val, domain_name, 
 
         for image in images_label_list:
             try:
+                current_image_path = os.path.join(download_dir, image + '.jpg')
+                dataset_image = cv2.imread(current_image_path)
+                size = dataset_image.shape
+                img_height =  1.0 *size[0]
+                img_width = 1.0 *size[1]
+
                 boxes = groups.get_group(image.split('.')[0])[['XMin', 'XMax', 'YMin', 'YMax']].values.tolist()
                 file_name = str(image.split('.')[0]) + '.txt'
                 file_path = os.path.join(label_dir, file_name)
+
 
                 if os.path.isfile(file_path):
                     f = open(file_path, 'a')
@@ -167,18 +174,28 @@ def get_label(folder, dataset_dir, class_name, class_code, df_val, domain_name, 
                 for box in boxes:
                     # box[0] -> Xmin, box[1] ->Xmax , box[2] -> ymin, box[3] -> ymax
 
-                    # data for yolo
-                    new_box_x = (box[1] + box[0])/2
-                    new_box_y = (box[3] + box[2])/2
-                    new_box_width = box[1] - box[0]
-                    new_box_height = box[3] - box[2]
+                    # data for darknet
+                    abs_x =  box[0] + 0.5*(box[1] - box[0])
+                    abs_y =  box[2] + 0.5*(box[3] - box[2])
+                    abs_width = box[1] - box[0]
+                    abs_height = box[3] - box[2]
+
+                    x = abs_x / img_width
+                    y = abs_y / img_height
+                    width = abs_width / img_width
+                    height = abs_height / img_height
+
+                    # new_box_x = (box[1] + box[0])/2
+                    # new_box_y = (box[3] + box[2])/2
+                    # new_box_width = box[1] - box[0]
+                    # new_box_height = box[3] - box[2]
 
                     # box[0] *= int(dataset_image.shape[1])
                     # box[1] *= int(dataset_image.shape[1])
                     # box[2] *= int(dataset_image.shape[0])
                     # box[3] *= int(dataset_image.shape[0])
                     # each row in a file is name of the class_name, XMin, YMix, XMax, YMax (left top right bottom)
-                    print(target_class_idx, new_box_x,new_box_y,new_box_width,new_box_height, file=f)
+                    print(target_class_idx, x,y,width,height, file=f)
 
             except Exception as e:
                 pass
