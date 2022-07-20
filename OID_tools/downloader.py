@@ -158,8 +158,8 @@ def get_label(folder, dataset_dir, class_name, class_code, df_val, domain_name, 
                 current_image_path = os.path.join(download_dir, image + '.jpg')
                 dataset_image = cv2.imread(current_image_path)
                 size = dataset_image.shape
-                img_height =  1.0 *size[0]
-                img_width = 1.0 *size[1]
+                # img_height =  1.0 *size[0]
+                # img_width = 1.0 *size[1]
 
                 boxes = groups.get_group(image.split('.')[0])[['XMin', 'XMax', 'YMin', 'YMax']].values.tolist()
                 file_name = str(image.split('.')[0]) + '.txt'
@@ -174,21 +174,21 @@ def get_label(folder, dataset_dir, class_name, class_code, df_val, domain_name, 
                 for box in boxes:
                     # box[0] -> Xmin, box[1] ->Xmax , box[2] -> ymin, box[3] -> ymax
 
-                    # data for darknet
-                    abs_x =  box[0] + 0.5*(box[1] - box[0])
-                    abs_y =  box[2] + 0.5*(box[3] - box[2])
-                    abs_width = box[1] - box[0]
-                    abs_height = box[3] - box[2]
+                    # # data for darknet
+                    # abs_x =  box[0] + 0.5*(box[1] - box[0])
+                    # abs_y =  box[2] + 0.5*(box[3] - box[2])
+                    # abs_width = box[1] - box[0]
+                    # abs_height = box[3] - box[2]
+                    #
+                    # x = abs_x / img_width
+                    # y = abs_y / img_height
+                    # width = abs_width / img_width
+                    # height = abs_height / img_height
 
-                    x = abs_x / img_width
-                    y = abs_y / img_height
-                    width = abs_width / img_width
-                    height = abs_height / img_height
-
-                    # new_box_x = (box[1] + box[0])/2
-                    # new_box_y = (box[3] + box[2])/2
-                    # new_box_width = box[1] - box[0]
-                    # new_box_height = box[3] - box[2]
+                    x = (box[1] + box[0])/2
+                    y = (box[3] + box[2])/2
+                    width = box[1] - box[0]
+                    height = box[3] - box[2]
 
                     # box[0] *= int(dataset_image.shape[1])
                     # box[1] *= int(dataset_image.shape[1])
