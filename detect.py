@@ -146,9 +146,6 @@ def detect(save_txt=False, save_img=False):
 
     if save_txt or save_img:
         print('Results saved to %s' % os.getcwd() + os.sep + out)
-        if platform == 'darwin':  # MacOS
-            os.system('open ' + out + ' ' + save_path)
-
     print('Done. (%.3fs)' % (time.time() - t0))
 
 
