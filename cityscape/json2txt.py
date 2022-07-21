@@ -50,7 +50,7 @@ def convert_annotation(json_path,data_path, type):
         load_dict = json.load(load_f)
         w = load_dict['imgWidth']  # 이미지 넓이 및 높이
         h = load_dict['imgHeight']
-        filename = filename[:-16]
+        filename = filename[:-21]
 
         # set the save path for converted annotation file
         out_file = open('%s/%s/Label/%s_leftImg8bit.txt' % (data_path,type,filename), 'w')

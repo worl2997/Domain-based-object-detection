@@ -51,7 +51,11 @@ def make_namefile(save_dir):
     return
 
 
-def make_datafile(save_dir,train_dir, val_dir,namefile_dir, num_of_class):
+def make_datafile(abs_dir,train_dir, val_dir,namefile_dir, num_of_class):
+    a = abs_dir.split('/')
+    new_dir = a[:-2]
+    proj_dir = '/'.join(new_dir)
+    save_dir = os.path.join(proj_dir,'config','custom_data','cityscapes.data')
 
     with open(save_dir,'w') as f:
         f.write("classes=%d"%(num_of_class)+'\n')
@@ -81,10 +85,10 @@ def make_filelist_txt(data_path, abs_path ):
 
     with open(train_txt_path, 'w') as ft:
         for i in t_list:
-            ft.write(os.path.join(abs_path,data_path,'train',i)+'\n')
+            ft.write(os.path.join(abs_path,'train',i)+'\n')
     with open(val_txt_path, 'w') as fv:
         for i in v_list:
-            fv.write(os.path.join(abs_path,data_path,'validation',i)+'\n')
+            fv.write(os.path.join(abs_path,'validation',i)+'\n')
 
     return  train_txt_path, val_txt_path
 
@@ -96,7 +100,7 @@ if __name__ == '__main__':
     data_path = 'cityscapes_OD_data'
     abs_path = make_abs_path(data_path)
     save_namefile_dir = os.path.join(abs_path,"cityscapes.name")
-    save_datafile_dir = "cityscapes.data"
+
     num_of_class= 4
     data_type = ['test', 'train', 'val']
 
@@ -107,4 +111,4 @@ if __name__ == '__main__':
     train_txt, val_txt = make_filelist_txt(data_path, abs_path)
     make_json2txt(data_path)
     make_namefile(save_namefile_dir)
-    make_datafile(save_datafile_dir, train_txt, val_txt, save_namefile_dir,num_of_class)
+    make_datafile(abs_path, train_txt, val_txt, save_namefile_dir,num_of_class)

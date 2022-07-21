@@ -271,7 +271,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def __init__(self, path, img_size=416, batch_size=16, augment=False, hyp=None, rect=False, image_weights=False,
                  cache_labels=False, cache_images=False):
 
-        #path -> train=/home/jacky/바탕화면/Domain-based-object-detection/data/custom/train/Highway/Highway_train.txt
+        # path -> train=/home/jacky/바탕화면/Domain-based-object-detection/data/custom/train/Highway/Highway_train.txt
         path = str(Path(path))  # os-agnostic
         assert os.path.isfile(path), 'File not found %s. See %s' % (path, help_url)
         with open(path, 'r') as f:
@@ -334,7 +334,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         # Preload labels (required for weighted CE training)
         self.imgs = [None] * n
         self.labels = [None] * n
+
+        #
         if cache_labels or image_weights:  # cache labels for faster training
+
             self.labels = [np.zeros((0, 5))] * n
             extract_bounding_boxes = False
             create_datasubset = False
@@ -342,10 +345,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             nm, nf, ne, ns, nd = 0, 0, 0, 0, 0  # number missing, found, empty, datasubset, duplicate
             for i, file in enumerate(pbar):
                 try:
+                    file = file.replace('\n', "")
                     with open(file, 'r') as f:
                         l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)
                 except:
-                    nm += 1  # print('missing labels for image %s' % self.img_files[i])  # file missing
+                    nm += 1
                     continue
 
                 if l.shape[0]:
@@ -392,8 +396,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                     ne += 1  # print('empty labels for image %s' % self.img_files[i])  # file empty
                     # os.system("rm '%s' '%s'" % (self.img_files[i], self.label_files[i]))  # remove
 
-                pbar.desc = 'Caching labels (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (
-                    nf, nm, ne, nd, n)
+                pbar.desc = 'Caching labels (%g found, %g missing, %g empty, %g duplicate, for %g images)' % (nf, nm, ne, nd, n)
             assert nf > 0, 'No labels found. See %s' % help_url
 
         # Cache images into memory for faster training (WARNING: Large datasets may exceed system RAM)
