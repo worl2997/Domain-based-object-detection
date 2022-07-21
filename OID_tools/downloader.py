@@ -170,11 +170,11 @@ def get_label(folder, dataset_dir, class_name, class_code, df_val, domain_name, 
                     y = (box[3] + box[2])/2
                     width = box[1] - box[0]
                     height = box[3] - box[2]
-
-                    result.append("%d %.6f %.6f %.6f %.6f" % (target_class_idx, x, y, width, height))
-                annotation = "\n".join(result)
-                f.write(annotation)
-                f.close()
+                    print("%d %.6f %.6f %.6f %.6f" % (target_class_idx, x, y, width, height), file=f)
+                    #result.append("%d %.6f %.6f %.6f %.6f" % (target_class_idx, x, y, width, height)+'\n')
+                # annotation = "".join(result)
+                # f.write(annotation)
+                # f.close()
 
             except Exception as e:
                 pass

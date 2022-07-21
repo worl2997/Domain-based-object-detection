@@ -39,7 +39,7 @@ def transform_to_trt(pre_weights,model_cfg, batch_size, IN_IMAGE_SIZE, space_siz
 
     # If pretrained weights are specified, start from checkpoint or weight file
     if pre_weights:
-        if pre_weights.endswith(".pth"):
+        if pre_weights.endswith(".pt"):
             # Load checkpoint weights
             print('pre_wegiht:',pre_weights)
             model.load_state_dict(torch.load(pre_weights, map_location=device))

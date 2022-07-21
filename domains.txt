@@ -1,1 +1,1 @@
-test Car
+Highway Person Bus Car Traffic_light
