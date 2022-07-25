@@ -435,6 +435,11 @@ random=1
 layers = -3
 
 #19
+[upsample]
+stride = 2
+
+
+#20
 [convolutional]
 batch_normalize=1
 filters=128
@@ -443,7 +448,7 @@ stride=1
 pad=1
 activation=leaky
 
-#20
+#21
 [convolutional]
 batch_normalize=1
 filters=64
@@ -452,7 +457,7 @@ stride=1
 pad=1
 activation=leaky
 
-#21
+#22
 [convolutional]
 size=1
 stride=1
@@ -460,7 +465,7 @@ pad=1
 filters=$(expr 3 \* $(expr $NUM_CLASSES \+ 5))
 activation=linear
 
-#22
+#23
 [yolo]
 mask = 0,1,2
 anchors = 10,13,  16,30,  33,23,  30,61,  62,45,  59,119,  116,90,  156,198,  373,326

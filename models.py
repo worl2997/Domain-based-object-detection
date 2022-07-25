@@ -4,8 +4,7 @@ from utils.google_utils import *
 from utils.parse_config import *
 from utils.utils import *
 
-ONNX_EXPORT = False
-
+ONNX_EXPORT = True
 
 def create_modules(module_defs, img_size, arc):
     # Constructs module list of layer blocks from module configuration in module_defs
@@ -114,6 +113,23 @@ def create_modules(module_defs, img_size, arc):
 
     return module_list, routs
 
+'''
+
+yolov3 output size :
+torch.size([1, 27, 8, 13])
+torch.Size([1, 27, 16, 26])
+torch.Size([1, 27, 32, 52])
+
+lw_yolo output size  : 
+torch.size([1, 27, 8, 13])
+torch.Size([1, 27, 16, 26])
+torch.Size([1, 27, 16, 26])
+
+
+'''
+
+
+
 
 class SwishImplementation(torch.autograd.Function):
     @staticmethod
@@ -157,49 +173,84 @@ class YOLOLayer(nn.Module):
 
         if ONNX_EXPORT:  # grids must be computed in __init__
             stride = [32, 16, 8][yolo_index]  # stride of this layer
-            nx = int(img_size[1] / stride)  # number x grid points
+            nx = int(img_size[1] / stride)  # number x grid points #
             ny = int(img_size[0] / stride)  # number y grid points
             create_grids(self, img_size, (nx, ny))
+            '''
+            img_shape => 256, 416
+            nx , ny 
+            layer 1 => 13, 8
+            layer 2 => 26, 16
+            layer 3 => 52, 32
+            '''
 
-    def forward(self, p, img_size, var=None):
+    def forward(self, p, img_size):
         if ONNX_EXPORT:
             bs = 1  # batch size
         else:
             bs, _, ny, nx = p.shape  # bs, 255, 13, 13
             if (self.nx, self.ny) != (nx, ny):
                 create_grids(self, img_size, (nx, ny), p.device, p.dtype)
-
+                '''
+                img size -> 256, 416
+                yolo layer 1  -> (13,8) 
+                yolo layer 2 -> (26,16)
+                yolo layer 3 ->(52, 32)
+                '''
         # p.view(bs, 255, 13, 13) -- > (bs, 3, 13, 13, 85)  # (bs, anchors, grid, grid, classes + xywh)
+        '''
+        p shape!!!!!!!!
+        torch.Size([1, 27 (na x no), 8, 13])
+        torch.Size([1, 27, 16, 26])
+        torch.Size([1, 27, 32, 52])
+        '''
+        print(p.shape)
         p = p.view(bs, self.na, self.no, self.ny, self.nx).permute(0, 1, 3, 4, 2).contiguous()  # prediction
 
+
+        '''
+        torch.Size([1, 3, 8, 13, 9])
+        torch.Size([1, 3, 16, 26, 9])
+        torch.Size([1, 3, 32, 52, 9])
+        '''
         if self.training:
             return p
 
         elif ONNX_EXPORT:
             # Constants CAN NOT BE BROADCAST, ensure correct shape!
             m = self.na * self.nx * self.ny
+            '''
+            self.ng 
+            layer 1 => [13, 8]
+            layer 2 => [26, 16]
+            layer 3 => [52, 32]
+            '''
             ngu = self.ng.repeat((1, m, 1))
+            '''
+            self.grid_xy shape :
+            torch.Size([1, 1, 8, 13, 2])
+            torch.Size([1, 1, 16, 26, 2])
+            torch.Size([1, 1, 32, 52, 2])
+            '''
             grid_xy = self.grid_xy.repeat((1, self.na, 1, 1, 1)).view(1, m, 2)
-            anchor_wh = self.anchor_wh.repeat((1, 1, self.nx, self.ny, 1)).view(1, m, 2) / ngu
+            # anchor_wh = self.anchor_wh.repeat((1, 1, self.nx, self.ny, 1)).view(1, m, 2) / ngu
+            anchor_wh = self.anchor_wh.repeat((1, 1, self.nx, self.ny, 1)).view(1, m, 2)
+            p = p.view(m, self.no) # p ->
+            xy = (torch.sigmoid(p[..., 0:2]) + grid_xy[0])* self.stride  # x, y
+            wh = (torch.exp(p[..., 2:4]) * anchor_wh[0])* self.stride  # width, height
 
-            p = p.view(m, self.no)
-            xy = torch.sigmoid(p[..., 0:2]) + grid_xy[0]  # x, y
-            wh = torch.exp(p[..., 2:4]) * anchor_wh[0]  # width, height
             p_conf = torch.sigmoid(p[:, 4:5])  # Conf
             p_cls = F.softmax(p[:, 5:self.no], 1) * p_conf  # SSD-like conf
-            return torch.cat((xy / ngu[0], wh, p_conf, p_cls), 1).t()
+            # a = torch.cat((xy,wh),1)
+            # print(a[0])
+            '''
+            [9, 312]
+            [9, 1248]
+            [9, 4992]
+            '''
+            # return torch.cat((xy / ngu[0], wh, p_conf, p_cls), 1).t()
 
-            # p = p.view(1, m, self.no)
-            # xy = torch.sigmoid(p[..., 0:2]) + grid_xy  # x, y
-            # wh = torch.exp(p[..., 2:4]) * anchor_wh  # width, height
-            # p_conf = torch.sigmoid(p[..., 4:5])  # Conf
-            # p_cls = p[..., 5:self.no]
-            # # Broadcasting only supported on first dimension in CoreML. See onnx-coreml/_operators.py
-            # # p_cls = F.softmax(p_cls, 2) * p_conf  # SSD-like conf
-            # p_cls = torch.exp(p_cls).permute((2, 1, 0))
-            # p_cls = p_cls / p_cls.sum(0).unsqueeze(0) * p_conf.permute((2, 1, 0))  # F.softmax() equivalent
-            # p_cls = p_cls.permute(2, 1, 0)
-            # return torch.cat((xy / ngu, wh, p_conf, p_cls), 2).squeeze().t()
+            return torch.cat((xy, wh, p_conf, p_cls), 1).t()
 
         else:  # inference
             # s = 1.5  # scale_xy  (pxy = pxy * s - (s - 1) / 2)
@@ -223,15 +274,17 @@ class YOLOLayer(nn.Module):
 
             # compute conf
             io[..., 5:] *= io[..., 4:5]  # conf = obj_conf * cls_conf
-
-            # reshape from [1, 3, 13, 13, 85] to [1, 507, 84], remove obj_conf
+            # output :
+            # torch.Size([1, 312, 8])   8x13
+            # torch.Size([1, 1248, 8])   16x26
+            # torch.Size([1, 4992, 8]    32x52
             return io[..., self.oi].view(bs, -1, self.no - 1), p
 
 
 class Darknet(nn.Module):
     # YOLOv3 object detection model
 
-    def __init__(self, cfg, img_size=(416, 416), arc='default'):
+    def __init__(self, cfg, img_size=(256, 416), arc='default'):
         super(Darknet, self).__init__()
 
         self.module_defs = parse_model_cfg(cfg)
@@ -242,8 +295,11 @@ class Darknet(nn.Module):
         self.version = np.array([0, 2, 5], dtype=np.int32)  # (int32) version info: major, minor, revision
         self.seen = np.array([0], dtype=np.int64)  # (int64) number of images seen during training
 
-    def forward(self, x, var=None):
+    def forward(self, x):
+        # x shape -> [1, 3, 256, 416]
         img_size = x.shape[-2:]
+        # img_size => (256, 416) ?
+
         layer_outputs = []
         output = []
 
@@ -265,6 +321,10 @@ class Darknet(nn.Module):
             elif mtype == 'shortcut':
                 x = x + layer_outputs[int(mdef['from'])]
             elif mtype == 'yolo':
+                '''
+                imgsize -> 256, 416
+                x shape => [1,27,8,13]
+                '''
                 x = module(x, img_size)
                 output.append(x)
             layer_outputs.append(x if i in self.routs else [])
@@ -274,9 +334,19 @@ class Darknet(nn.Module):
         elif ONNX_EXPORT:
             output = torch.cat(output, 1)  # cat 3 layers 85 x (507, 2028, 8112) to 85 x 10647
             nc = self.module_list[self.yolo_layers[0]].nc  # number of classes
+            '''
+            ONNX scores : output[5:5 + nc].t() -> [6552, 4] # class is  4
+            boxes predict : output[0:4].t() -> [6552, 4]
+            '''
             return output[5:5 + nc].t(), output[0:4].t()  # ONNX scores, boxes
         else:
+
             io, p = list(zip(*output))  # inference output, training output
+
+            '''
+            io -> [ [1,312,8], [1.1248,8], [1, 4992, 8] ]
+            out -> torch.cat(io,1) => size ([1, 6552, 8])
+            '''
             return torch.cat(io, 1), p
 
     def fuse(self):
@@ -319,7 +389,6 @@ def create_grids(self, img_size=416, ng=(13, 13), device='cpu', type=torch.float
 
 def load_darknet_weights(self, weights, cutoff=-1):
     # Parses and loads the weights stored in 'weights'
-
     # Establish cutoffs (load layers between 0 and cutoff. if cutoff = -1 all are loaded)
     file = Path(weights).name
     if file == 'darknet53.conv.74':

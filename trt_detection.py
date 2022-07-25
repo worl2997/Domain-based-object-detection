@@ -4,11 +4,11 @@ import argparse
 import cv2
 import pycuda.autoinit
 
-from detection_tools.display_utils import open_window, set_display, show_fps, BBoxVisualization
+from detection_tools.display_utils import open_window, set_display
 from detection_tools.detect_uilts import add_camera_args, Detect
 from detection_tools.utils import *
 from detection_tools.trt_yolo_plugin import Trt_yolo
-
+from utils.utils import *
 # real time object detection with TensorRT optimized YOLO engine
 
 WINDOW_NAME = 'Trt_object_detection'
@@ -24,14 +24,16 @@ def parse_args():
         help='path of class name file')
 
     parser.add_argument(
-        '-t', '--conf_thresh', type=float, default=0.5,
+        '-t', '--conf_thresh', type=float, default=0.3,
         help='set the detection confidence threshold')
     parser.add_argument(
-        '-n', '--nms_thresh', type=float, default=0.6,
+        '-n', '--nms_thresh', type=float, default=0.4,
         help='set the detection confidence threshold')
     parser.add_argument(
         '-m', '--model', type=str, required=True,
         help='set the path of engine file ex: ./yolo.engine')
+    parser.add_argument('--half', action='store_true', help='half precision FP16 inference')
+
     args = parser.parse_args()
     return args
 
@@ -43,20 +45,34 @@ def loop_and_detect(cam, trt_yolo, conf_th, nms_th, class_list):
     full_screen = False
     fps = 0.0
     tic = time.time()
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(class_list))]
 
     while True:
         if cv2.getWindowProperty(WINDOW_NAME, 0) < 0:
             break
-        img = cam.read() # 비디오로부터 프레임 반환
+        img = cam.read()
         if img is None:
             break
+        # img shape -> (480, 854, 3)
+        pred, rsz_img, orisz_img = trt_yolo.detect(img,conf_th, nms_th) # trt engine 기반 추론
+        pred = non_max_suppression(torch.from_numpy(pred), conf_th, nms_th)
+        # rsz_img.shape
+        for i, det in enumerate(pred):
+            s, im0 = '', img
+            if det is not None and len(det):
+                det[:,:4] = scale_coords(rsz_img.shape[1:], det[:, :4], orisz_img).round()
 
-        boxes = trt_yolo.detect(img,conf_th, nms_th) # trt engine 기반 추론
-        rescale_boxes(boxes[0], 416, img.shape[:2]) # 5/2 추가된 코드
-        #img = vis.draw_bboxes(img, boxes, confs,cls)
-        img = plot_boxes_cv2(img, boxes[0], class_names=class_list)
-        img = show_fps(img, fps) # fps 표시
-        cv2.imshow(WINDOW_NAME, img)
+                # print result
+                for c in det[:,-1].unique():
+                    n = (det[:, -1] == c).sum()  # detections per class
+                    s += '%g %ss, ' % (n, class_list[int(c)])  # add to string
+
+                # write results
+                for *xyxy, conf, cls in det:
+                    label = '%s %.2f' % (class_list[int(cls)], conf)
+                    plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
+        cv2.imshow(WINDOW_NAME, im0)
+
         toc = time.time()
         curr_fps = 1.0 / (toc - tic)
         # calculate an exponentially decaying average of fps number
@@ -69,6 +85,7 @@ def loop_and_detect(cam, trt_yolo, conf_th, nms_th, class_list):
         elif key == ord('F') or key == ord('f'):
             full_screen = not full_screen
             set_display(WINDOW_NAME, full_screen)
+
 
 
 def main():
@@ -88,10 +105,12 @@ def main():
         WINDOW_NAME, 'TensorRT object detecion',
         cam.img_width, cam.img_height)
 
-    trt_yolo = Trt_yolo(args.model, len(cls_list), img_size)
+    trt_yolo = Trt_yolo(args.model, len(cls_list), img_size, args.half)
     loop_and_detect(cam, trt_yolo, args.conf_thresh, args.nms_thresh, cls_list)
     cam.release()
     cv2.destroyAllWindows()
+
+
 
 if __name__ == '__main__':
     main()

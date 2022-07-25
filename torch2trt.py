@@ -7,33 +7,59 @@ import onnxruntime
 import torch
 from utils.datasets import *
 from utils.utils import *
-import onnx
 from utils.torch_utils import select_device
 from models import *  # set ONNX_EXPORT in models.py
 from utils.general import check_requirements
 
-def export_onnx(model, im, file, opset, train, dynamic, simplify,space_size):
+def export_onnx(opt, file):
     #  ONNX export
+    # opt.opset, opt.train, opt.dynamic, opt.simplify, opt.workspace
+    print(file)
+    opset =opt.opset
+    train =opt.train
+    dynamic = opt.dynamic
+    simplify = opt.simplify
+    workspace = opt.workspace
     trt_save_name = file.split('.')[0] + '.engine'
+    device = torch_utils.select_device(device='cpu' if ONNX_EXPORT else opt.device)
+    img_size = (256, 416)
 
+
+    # Initialize model
+    model = Darknet(opt.model, img_size)  # img_size -> 416, 416
+    weights = opt.weights
+
+    # attempt_download(weights)
+    if weights.endswith('.pt'):  # pytorch format
+        model.load_state_dict(torch.load(weights, map_location=device)['model'])
+    else:  # darknet format
+        _ = load_darknet_weights(model, weights)
+
+    # Eval mode
+    model.to(device).eval()
+    im = torch.zeros((1,3)+img_size)
+
+    if opt.half:
+        im, model = im.half(), model.half()
     try:
-        check_requirements(('onnx',))
         import onnx
-
         print('start onnx exporting..')
+        torch.onnx.export(
+            model,
+            im,
+            file,
+            verbose=False,
+            opset_version=opset,
+            do_constant_folding=not train,
+            input_names = ['input'],
+            output_names = ['outputs']
+        )
 
-
-        torch.onnx.export(model, im, file, verbose=False, opset_version=opset,
-                          training=torch.onnx.TrainingMode.TRAINING if train else torch.onnx.TrainingMode.EVAL,
-                          do_constant_folding=not train,
-                          input_names=['input'],
-                          output_names=['outputs'],
-                          dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},  # shape(1,3,640,640)
-                                        'outputs': {0: 'batch', 1: 'anchors'}  # shape(1,25200,85)
-                                        } if dynamic else None)
 
         # Checks
-        model_onnx = onnx.load(file)  # load onnx model
+        model = onnx.load(file)  # load onnx model
+        onnx.checker.check_model(model)  # Check that the IR is well formed
+        print(onnx.helper.printable_graph(model.graph))  # Print a human readable representation of the graph
 
         # Simplify
         if simplify:
@@ -43,7 +69,7 @@ def export_onnx(model, im, file, opset, train, dynamic, simplify,space_size):
 
                 print("simplyfying with onnx simplify...")
                 model_onnx, check = onnxsim.simplify(
-                    model_onnx,
+                    file,
                     dynamic_input_shape=dynamic,
                     input_shapes={'images': list(im.shape)} if dynamic else None)
                 assert check, 'assert check failed'
@@ -56,16 +82,15 @@ def export_onnx(model, im, file, opset, train, dynamic, simplify,space_size):
         print('onnx_export_fail')
         print(e)
         return
+
     ONNX = 'trtexec --onnx=%s' % file
     BATCH = '--explicitBatch'
     ENGINE = '--saveEngine=%s' % trt_save_name
-    WORKSPACE = '--workspace=%d' % space_size
+    WORKSPACE = '--workspace=%d' % workspace
     FP = '--fp16 '
     command = ' '.join([ONNX, BATCH, ENGINE, WORKSPACE, FP])
     os.system(command)
     return
-
-
 
 
 
@@ -79,26 +104,12 @@ def run(opt):
     assert not (device.type == 'cpu' and opt.half), '--half only compatible with GPU export, i.e. use --device 0'
 
 
-    # Initialize model
-    model = Darknet(opt.model, opt.imgsz).to(device)
-
-    # Load weights
-    if weights.endswith('.pt'):  # pytorch format
-        model.load_state_dict(torch.load(weights, map_location=device)['model'])
-    else:  # darknet format
-        _ = load_darknet_weights(model, weights)
-
-
     # Input
     im =  torch.zeros(opt.batch_size, 3, *opt.imgsz).to(device)  # image size(1,3,320,192) BCHW iDetection
 
-    # Update model
-    if opt.half:
-        im, model = im.half(), model.half()  # to FP16
-    model.train() if opt.train else model.eval()  # training mode = no Detect() layer grid construction
 
     # Exports
-    export_onnx(model, im, onnx_file_name , opt.opset, opt.train, opt.dynamic, opt.simplify,opt.workspace)
+    export_onnx(opt, onnx_file_name)
 
 
     # Finish
@@ -109,7 +120,7 @@ def parse_opt():
     parser.add_argument('--model', type=str, required=True, help='set the cfg file path ')
     parser.add_argument('--workspace', type=int, default=4096, help='set the workspace size for TRT trasnformation')
     parser.add_argument('--weights', type=str, required=True, help='weights path')
-    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[416, 416], help='image (h, w)')
+    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[256, 416], help='image (h, w)')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--half', action='store_true', help='FP16 half-precision export')
@@ -130,4 +141,3 @@ if __name__ == '__main__':
     print("Converting to onnx and running demo ...")
     opt = parse_opt()
     run(opt)
-

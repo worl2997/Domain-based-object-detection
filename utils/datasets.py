@@ -438,6 +438,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         mosaic = True and self.augment  # load 4 images at a time into a mosaic (only during training)
         if mosaic:
             # Load mosaic
+
             img, labels = load_mosaic(self, index)
             h, w = img.shape[:2]
             ratio, pad = None, None
@@ -450,6 +451,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             h, w = img.shape[:2]
             shape = self.batch_shapes[self.batch[index]] if self.rect else self.img_size  # final letterboxed shape
             img, ratio, pad = letterbox(img, shape, auto=False, scaleup=self.augment)
+
 
             # Load labels
             labels = []
@@ -515,6 +517,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
+        # img size -> (3,416,416)
+
         return torch.from_numpy(img), labels_out, img_path, ((h, w), (ratio, pad))
 
     @staticmethod
@@ -536,6 +540,7 @@ def load_image(self, index):
         if self.augment and (r != 1):  # always resize down, only resize up if training with augmentation
             h, w = img.shape[:2]
             return cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_LINEAR)  # _LINEAR fastest
+
     return img
 
 
@@ -549,7 +554,8 @@ def load_mosaic(self, index):
     # loads images in a mosaic
 
     labels4 = []
-    s = self.img_size
+    s = self.img_size # 416
+
     xc, yc = [int(random.uniform(s * 0.5, s * 1.5)) for _ in range(2)]  # mosaic center x, y
     img4 = np.zeros((s * 2, s * 2, 3), dtype=np.uint8) + 128  # base image with 4 tiles
     indices = [index] + [random.randint(0, len(self.labels) - 1) for _ in range(3)]  # 3 additional image indices

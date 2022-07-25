@@ -4,10 +4,12 @@ import cv2
 from models import *  # set ONNX_EXPORT in models.py
 from utils.datasets import *
 from utils.utils import *
-
+import torch
 
 def detect(save_txt=False, save_img=False):
-    img_size = (608, 352) if ONNX_EXPORT else opt.img_size  # (320, 192) or (416, 256) or (608, 352) for (height, width)
+    img_size = (256, 416) if ONNX_EXPORT else opt.img_size  # (320, 192) or (416, 256) or (608, 352) for (height, width)
+
+
     out, source, weights, half, view_img = opt.output, opt.source, opt.weights, opt.half, opt.view_img
     webcam = source == '0' or source.startswith('rtsp') or source.startswith('http') or source.endswith('.txt')
 
@@ -18,21 +20,15 @@ def detect(save_txt=False, save_img=False):
     os.makedirs(out)  # make new output folder
 
     # Initialize model
-    model = Darknet(opt.cfg, img_size)
+    model = Darknet(opt.cfg, img_size) # img_size -> 416, 416
 
     # Load weights
-    attempt_download(weights)
+    # attempt_download(weights)
     if weights.endswith('.pt'):  # pytorch format
         model.load_state_dict(torch.load(weights, map_location=device)['model'])
     else:  # darknet format
         _ = load_darknet_weights(model, weights)
 
-    # Second-stage classifier
-    classify = False
-    if classify:
-        modelc = torch_utils.load_classifier(name='resnet101', n=2)  # initialize
-        modelc.load_state_dict(torch.load('weights/resnet101.pt', map_location=device)['model'])  # load weights
-        modelc.to(device).eval()
 
     # Fuse Conv2d + BatchNorm2d layers
     # model.fuse()
@@ -76,21 +72,25 @@ def detect(save_txt=False, save_img=False):
     for path, img, im0s, vid_cap in dataset:
         t = time.time()
 
+        # img_shape -> (3, 256, 416)
+        # im0s_shape -> (480, 854, 3) original image shape
+
         # Get detections
+
         img = torch.from_numpy(img).to(device)
         if img.ndimension() == 3:
             img = img.unsqueeze(0)
+
         pred = model(img)[0]
+
+        # pred_shape => [1,2808,8] -> lw_yolo
+        # pred_shape => [1, 6552, 8]
 
         if opt.half:
             pred = pred.float()
 
         # Apply NMS
         pred = non_max_suppression(pred, opt.conf_thres, opt.nms_thres)
-
-        # Apply
-        if classify:
-            pred = apply_classifier(pred, modelc, img, im0s)
 
         # Process detections
         for i, det in enumerate(pred):  # detections per image
@@ -103,6 +103,9 @@ def detect(save_txt=False, save_img=False):
             s += '%gx%g ' % img.shape[2:]  # print string
             if det is not None and len(det):
                 # Rescale boxes from img_size to im0 size
+                #
+                # print(img.shape[2:]) -> 256 x 416
+                # print(im0.shape) -> 480 x 854, 3
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
                 # Print results
@@ -151,9 +154,9 @@ def detect(save_txt=False, save_img=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3-spp.cfg', help='*.cfg path')
-    parser.add_argument('--names', type=str, default='data/coco.names', help='*.names path')
-    parser.add_argument('--weights', type=str, default='weights/yolov3-spp.weights', help='path to weights file')
+    parser.add_argument('--cfg', type=str, required=True, help='*.cfg path')
+    parser.add_argument('--names', type=str, required=True, help='*.names path')
+    parser.add_argument('--weights', type=str, required=True, help='path to weights file')
     parser.add_argument('--source', type=str, default='data/samples', help='source')  # input file/folder, 0 for webcam
     parser.add_argument('--output', type=str, default='output', help='output folder')  # output folder
     parser.add_argument('--img-size', type=int, default=416, help='inference size (pixels)')
@@ -161,7 +164,7 @@ if __name__ == '__main__':
     parser.add_argument('--nms-thres', type=float, default=0.5, help='iou threshold for non-maximum suppression')
     parser.add_argument('--fourcc', type=str, default='mp4v', help='output video codec (verify ffmpeg support)')
     parser.add_argument('--half', action='store_true', help='half precision FP16 inference')
-    parser.add_argument('--device', default='', help='device id (i.e. 0 or 0,1) or cpu')
+    parser.add_argument('--device', default='0', help='device id (i.e. 0 or 0,1) or cpu')
     parser.add_argument('--view-img', action='store_true', help='display results')
     opt = parser.parse_args()
     print(opt)

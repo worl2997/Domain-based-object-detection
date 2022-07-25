@@ -472,10 +472,13 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5, multi_cls=Tru
     # Box constraints
     min_wh, max_wh = 2, 10000  # (pixels) minimum and maximium box width and height
 
-    output = [None] * len(prediction)
+    output = [None] * len(prediction) # 각 batch 별 output 결과 저장
     for image_i, pred in enumerate(prediction):
+        # pred_shape => [2808,8]
         # Remove rows
         pred = pred[(pred[:, 4:] > conf_thres).any(1)]  # retain above threshold
+        # 각 instance 별 threshold 값?
+        # treshold 이하의 검출 인스턴스 제거 -> ex) [2808,8] -> [4,8]
 
         # Select only suitable predictions
         i = (pred[:, 2:4] > min_wh).all(1) & (pred[:, 2:4] < max_wh).all(1) & torch.isfinite(pred).all(1)

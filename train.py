@@ -54,11 +54,11 @@ def train(args,model_cfg, device, tb_writer, path):
 
     cfg = model_cfg
     img_size = args.img_size
+
     epochs = 1 if args.prebias else args.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
     batch_size = args.batch_size
     accumulate = args.accumulate  # effective bs = batch_size * accumulate = 16 * 4 = 64
     weights = args.weights  # initial training weights
-
     data = os.path.join(path.DATA_FILE_DIR, args.domain + '.data')  # args.data
     data_dict = parse_data_cfg(data)
 
@@ -77,7 +77,6 @@ def train(args,model_cfg, device, tb_writer, path):
 
     # Configure run
     train_path = data_dict['train']
-
     test_path = data_dict['valid']
     nc = int(data_dict['classes'])  # number of classes
 
@@ -259,6 +258,7 @@ def train(args,model_cfg, device, tb_writer, path):
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device).float() / 255.0  # uint8 to float32, 0 - 255 to 0.0 - 1.0
+
             targets = targets.to(device)
 
             # Multi-Scale training
@@ -289,7 +289,7 @@ def train(args,model_cfg, device, tb_writer, path):
             #         x['weight_decay'] = hyp['weight_decay'] * g
 
             # Run model
-            pred = model(imgs)
+            pred = model(imgs) # imgs shape -> [8,3,416,416]
 
             # Compute loss
             loss, loss_items = compute_loss(pred, targets, model)
