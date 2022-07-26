@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 import os.path
-from json2txt import make_json2txt
+from data_processing import make_json2txt
 
 def gather_json(gtFine_dir,type):
     if type == 'train' or type =='test':

@@ -4,7 +4,7 @@ from utils.google_utils import *
 from utils.parse_config import *
 from utils.utils import *
 
-ONNX_EXPORT = True
+ONNX_EXPORT = False
 
 def create_modules(module_defs, img_size, arc):
     # Constructs module list of layer blocks from module configuration in module_defs
@@ -204,7 +204,6 @@ class YOLOLayer(nn.Module):
         torch.Size([1, 27, 16, 26])
         torch.Size([1, 27, 32, 52])
         '''
-        print(p.shape)
         p = p.view(bs, self.na, self.no, self.ny, self.nx).permute(0, 1, 3, 4, 2).contiguous()  # prediction
 
 
