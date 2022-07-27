@@ -1,4 +1,4 @@
-# 프레임워크 셋팅 및 동작 방법
+# 프레임워크 셋팅 및 동작
 
 본 프레임워크는 다음과 같은 환경에서 동작한다 
 
@@ -7,11 +7,11 @@
 - Python 3.8
 - GPU : NVidia rtx 2080 ti (8GB)
 
-본 문서에서는 프레임워크 동작을 위한 2가지 환경 셋팅 방법과 기본적인 프레임워크 동작 방법을 소개한다.
+본 문서에서는 프레임워크 동작을 위한 2가지 환경 셋팅 방법을 소개한다.
 
-첫번쨰로 docker container를 이용하는 방법과,  
-두번째로 로컬 환경에서 개발 환경을 셋팅을 설명하고,   
-프레임워크 동작 명령어를 설명한다. 
+첫번쨰로 docker container 상에서 동작하는 방법과 
+
+두번째로 로컬 환경에서 개발 환경을 셋팅하는 방법을 설명한다.
 
 ## [ Docker container 기반 프레임워크 동작 ]
 
@@ -94,7 +94,7 @@ Sat May 14 10:26:46 2022
     
 
 ```bash
-$ docker pull gklv6088/od_framework:1.0
+$ docker pull gklv6088/od-fw:latest
 ```
 
 **프레임워크 이미지 기반 컨테이너 실행** 
@@ -104,10 +104,24 @@ $ docker pull gklv6088/od_framework:1.0
 (프레임워크를 통해 학습된 모델을 /host_temp 로 이동하여 로컬 환경에 공유 가능)
 
 ```bash
-$ nvidia-docker run -it --name od_framework -v /home/jacky/docker:/host_temp/ gklv6088/od_framework:1.0
+$ nvidia-docker run -it --name od_framework -v /home/jacky/docker:/host_temp/ gklv6088/od-fw:latest
 ```
 
-.
+컨테이너 workspace에 프로젝트 clone 및 프로젝트 디렉토리 이동 
+
+```bash
+cd /workspace 
+git clone https://github.com/worl2997/Domain-based-object-detection.git
+cd Domain-based-object-detection
+```
+
+**컨테이너 구성 환경**  
+
+- Pytorch : 1.11.0+cu113
+- CUDA : 11.4
+- Nvidia driver : 470.129.06
+- tensorrt : 8.0.1.6
+- onnx : 1.11.0
 
 ## [ 로컬 환경에서 프레임워크 실행을 위한 셋팅]
 
@@ -115,7 +129,7 @@ $ nvidia-docker run -it --name od_framework -v /home/jacky/docker:/host_temp/ gk
 - TensorRT 8.0 버전 이상
 - 위 쿠다 조건에 맞는 Pytorch GPU 버전 설치
 
- (셋팅을 위한 설명은 추후에 업로드 예정 )
+ (셋팅을 위한 설명은 필요시 추후 업로드 예정 )
 
 ## [ 프레임워크 기본 동작 실행 ]
 
@@ -188,8 +202,7 @@ data   # 각 클래스별 1개의 데이터를 다운로드 했을 때 예시
             `-- [downloaded_valid_img_data].jpg
 ```
 
-추가적으로 프로젝트의 config/custom_data 디렉토리에  다음과 같은 data파일을 생성한다. 
-프레임워크로 모델 학습시 해당 data 파일을 읽어들여 파이토치 dataloader에 데이터를 로드한다.
+추가적으로 프로젝트의 config/custom_data 디렉토리에  다음과 같은 data 파일을 생성한다.  프레임워크로 모델 학습시 해당 data 파일을 읽어들여 파이토치 dataloader에 데이터를 로드한다.
 
 ```bash
 root@9c290ab914f3:/Domain_based_OD_Framework/config/custom_data# ls
@@ -208,7 +221,7 @@ names=/workspace/Domain_based_OD_Framework/data/custom/domain_list/Highway.name
 현재 프레임워크에서 학습을 지원하는 모델은 다음과 같다 
 
 - yolov3
-- yolov3-tiny
+- yolov3_tiny
 - lw_yolo (CCLAB 연구실 제안 기법 → [https://www.mdpi.com/1099-4300/24/1/77](https://www.mdpi.com/1099-4300/24/1/77))
 
 lw_yolo의 경우 pretrained된 가중치를 제공하지 않으며, 
@@ -223,17 +236,19 @@ weights
 |-- yolov3.weights # COCO dataset 기반 학습된 yolov3 가중치  
 ```
 
-모델 학습은 아래와 같은 명령어를 통해 실행한다 
+모델 학습은 아래와 같은 명령어를 통해 실행한다 (프로젝트 내 parser.py 참조) 
 
 - --model : 학습할 모델 명 선택  ( yolov3,  yolov3_tiny,  lw_yolo )
 - --domain : 학습할 도메인 데이터 선택 (도메인 이름 ex: Park, Highway)
 - --classes : 학습할 클래스 개수 (Park의 경우 Person 클래스 1개를 학습하므로 1)
-- --vervose : 매 iteration 마다 학습 상황 확인
 - --epochs : 학습할 epoch 수
-- --pretrained_weight : 사전 학습된 가중치 경로 입력, 가중치가 없다면 입력 x
+- --weights : 사전 학습된 가중치 경로 입력, 가중치가 없다면 입력 x (pytorch, darknet 형식 지원)
+- --batch-size : batch size 설정
+- --nosave : backup 파일을 저장하지 않고 최고 성능의 모델만 저장
+- --device : 학습을 수행할 장치 지정 (ex: `0 or 0,1 or cpu` )
 
 ```bash
-$ python main.py train --model yolov3 --domain Park --classes 1 --epochs 200 --pretrained_weight weights/darknet53.conv74 --verbose
+$ python main.py train --model yolov3 --domain Park --classes 1 --epochs 200 --weights weights/darknet53.conv74 --batch-size 8 --nosave --device 0
 ```
 
 위 명령어를 실행할 경우 다운로드한 커스텀 데이터에 대한 model cfg 파일을 생성하고 읽어들여 학습할 모델을 로드한다.  생성된 커스텀 모델 cfg 파일은 다음과 같은 디렉토리에 저장된다 .
@@ -282,4 +297,78 @@ steps= 1600 ,1800
 scales=.1,.1
 ```
 
-*프레임워크에서 지원하는 모델이 아닌 다른 모델로 학습해야 할 경우 [model.py](http://model.py)를 수정하여 추가하여야한다. 이에 대한 내용은 model.py 관련 문서에서 기재한다.
+### **Pytorch 모델 기반 객체 검출 수행**
+
+아래와 같은 명령어를 통해서 pytorch 모델 기반 detection을 수행하며 detection 결과는 output 디렉토리에 영상으로 저장된다. 
+
+- --source : detect 할 video 파일 경로 입력
+- --view-img : 실시간으로 검출 결과를 영상으로 확인 가능
+
+*모듈에 대한 보다 자세한 문서는 추후 작성하여 업로드 예정 
+
+```python
+python detect.py --cfg cfg/city_yolov3_4.cfg --names city.name --weights weights/city_yolov3.pt --source city.mp4 --view-img
+```
+
+### **TensorRT 엔진 변환**
+
+Pytorch 기반으로 학습된 커스텀 모델을 TensorRT 엔진으로 변환하기 위해서 [torch2trt.py](http://torch2trt.py) 모듈을 다음과 같은 명령어로 실행한다. torch2trt.py는 pytorch 기반 모델을 onnx로 변환한 후 trtexec 툴을 사용하여 TensorRT 엔진으로 변환한다.
+
+먼저 파이토치 모델을 tensorRT 엔젠으로 변환하기 전에, [models.py](http://models.py) 의 ONNX_EXPORT 글로벌 변수를 True로 설정한다.  
+
+```python
+import torch.nn.functional as F
+from utils.google_utils import *
+from utils.parse_config import *
+from utils.utils import *
+'''
+Tensorrt 엔진 변환을 수행하기 위해서 ONNX_EXPORT 글로벌 변수를 True로 설정
+Pytorch 모델 학습 및 detection 수행은 ONNX_EXPORT를 False로 설정 
+'''
+ONNX_EXPORT = True 
+```
+
+그 후 다음과 같은 명령어를 통해 tensorRT 엔진 파일을 생성한다. 
+
+```bash
+# yolov3 모델 변환 예시 
+# --weight : 학습된 pytorch 및 다크넷 weight 
+# --model : model cfg 파일 
+$ python torch2trt.py --weight weights/yolov3.weights --model config/yolov3.cfg 
+```
+
+trtexec은 자체 애플리케이션을 개발하지 않고도 TensorRT를 빠르게 활용할 수 있는 tool로, 다음과 기능을 수행한다. 
+
+- Random 혹은 사용자 제공 입력 데이터에 대한 벤치마킹 네트워크.
+- 모델로부터 직렬화된 엔진 생성.
+- 빌더에서 직렬화된 타이밍 캐시를 생성.
+
+관련 documentation : [https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html](https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html)
+
+변환된 Onnx 및 TensorRT 엔진은 프로젝트 디렉토리에 다음과 같은 이름으로 저장된다
+
+```bash
+Domain_based_OD_Framework # 프로잭트 디렉토리 
+|-- yolov3.engine # 변환된 TensorRT 엔진 파일 
+`-- yolov3_static.onnx # 변환된 onnx 파일
+```
+
+### **TensorRT 엔진 기반 객체 검출 실행**
+
+변환된 엔진파일을 기반으로 영상 객체검출을 아래 예시와 같은 명령어를 통해 실행한다. 
+
+- --name_file : 학습된 클래스 명이 기재된 name 파일 경로 입력
+- --model : 변환된 tensorrt 엔진파일 경로 입력
+- --videio : detection 작업을 수행할 영상 경로 입력
+- -t : confidnec threshold를 설정 (default : 0.1)
+- -n : NMS threshold를 설정 (default : 0.4)
+
+```bash
+python3 trt_detection.py --model Highway_lw_yolo_4.engine --name_file data/custom/domain_list/Highway.name --video city.mp4 -t 0.1 -n 0.4
+```
+
+실행 결과
+
+(종료 esc)
+
+![domain_list](../readme/trt_detection.PNG)  

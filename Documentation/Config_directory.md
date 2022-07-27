@@ -1,3 +1,1 @@
-# Config directory
-
-d
+# Config_directory
