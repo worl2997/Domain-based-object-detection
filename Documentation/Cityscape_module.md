@@ -26,8 +26,8 @@ cityscape
 다운로드 된 cityscapes 데이터는 data_processing.py를 통해 segmentation 데이터를 전처리하여 2D bounding box 데이터셋을 생성하고 Integration_OID.py를 통해 가공된 데이터를 프레임워크에 적용할 수 있도록  전처리한다. 
 
 기존의 cityscapes 데이터 셋은 아래 그림과 같은 클래스 그룹을 지원한다. 하지만 명시된 클래스는 segmentation 작업을 위해 지정된 클래스이므로 object detection에는 적합하지 않다. 본 프로젝트에서 제공한 코드는 임의로 크게 4가지 클래스를 지정하여 다음과 같이 구성한다.
+![image](/readme/cityscapes_classes.png)
 
-![cityscapes_classes]("/readme/cityscapes_classes.PNG")  
 **[ Cityscapes object detection dataset class 목록]**
 
 `['person'**,** 'rider']` ⇒ ‘person’  
