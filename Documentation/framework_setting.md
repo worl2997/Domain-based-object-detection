@@ -371,4 +371,4 @@ python3 trt_detection.py --model Highway_lw_yolo_4.engine --name_file data/custo
 
 (종료 esc)
 
-![domain_list](../readme/trt_detection.PNG)  
+![trt_detection](../readme/trt_detection.png)  
