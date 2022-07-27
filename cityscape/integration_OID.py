@@ -43,9 +43,8 @@ def gather_png(leftImg_dir, data_path,type):
         for i in file_list:
             shutil.copy(os.path.join(img_dir,i), os.path.join(dest_dir,i))
 
-def make_namefile(save_dir):
+def make_namefile(save_dir, class_list):
     namefile = open(save_dir, 'w')  # left8bit 이미지에 대한 라벨 생성
-    class_list= ['person','vehicle', 'traffic sign', 'traffic light']
     for class_ in class_list:
         namefile.write(class_ + '\n')
     return
@@ -100,9 +99,8 @@ if __name__ == '__main__':
     data_path = 'cityscapes_OD_data'
     abs_path = make_abs_path(data_path)
     save_namefile_dir = os.path.join(abs_path,"cityscapes.name")
-
-    num_of_class= 4
     data_type = ['test', 'train', 'val']
+    class_list= ['person','vehicle', 'traffic sign', 'traffic light']
 
     for type in data_type:
         gather_json(gtFine_dir, type)
@@ -110,5 +108,5 @@ if __name__ == '__main__':
 
     train_txt, val_txt = make_filelist_txt(data_path, abs_path)
     make_json2txt(data_path)
-    make_namefile(save_namefile_dir)
-    make_datafile(abs_path, train_txt, val_txt, save_namefile_dir,num_of_class)
+    make_namefile(save_namefile_dir, class_list)
+    make_datafile(abs_path, train_txt, val_txt, save_namefile_dir,len(class_list))

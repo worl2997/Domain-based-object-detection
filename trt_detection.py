@@ -24,7 +24,7 @@ def parse_args():
         help='path of class name file')
 
     parser.add_argument(
-        '-t', '--conf_thresh', type=float, default=0.3,
+        '-t', '--conf_thresh', type=float, default=0.1,
         help='set the detection confidence threshold')
     parser.add_argument(
         '-n', '--nms_thresh', type=float, default=0.4,

@@ -21,14 +21,12 @@ def parse_arguments():
     parser.add_argument('--weights', type=str, default=None, help='initial weights')
     parser.add_argument("--n_cpu", type=int, default=8, help="Number of cpu threads to use during batch generation")
     parser.add_argument('--batch-size', type=int, default=16)  # effective bs = batch_size * accumulate = 16 * 4 = 64
-
     parser.add_argument('--multi-scale', action='store_true', help='adjust (67% - 150%) img_size every 10 batches')
     parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument("--conf_thres", type=float, default=0.3, help="Evaluation: Object confidence threshold")
     parser.add_argument("--nms_thres", type=float, default=0.5, help="Evaluation: IOU threshold for non-maximum suppression")
     parser.add_argument("--logdir", type=str, default="logs", help="Directory for training log files (e.g. for TensorBoard)")
     parser.add_argument("--seed", type=int, default=-1, help="Makes results reproducable. Set -1 to disable.")
-
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', action='store_true', help='resume training from last.pt')
     parser.add_argument('--transfer', action='store_true', help='transfer learning')
@@ -57,7 +55,7 @@ def parse_arguments():
                         help="Sequence of 'strings' of the wanted classes")
     parser.add_argument('--noLabels', required=False, action='store_true',
                         help='No labels creations')
-    parser.add_argument('--n_threads', required=False, metavar="[default 20]", default=100,
+    parser.add_argument('--n_threads', required=False, metavar="[default 20]", default=120,
                         help='Num of the threads for download dataset')
 
 

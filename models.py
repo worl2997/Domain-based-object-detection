@@ -4,7 +4,7 @@ from utils.google_utils import *
 from utils.parse_config import *
 from utils.utils import *
 
-# testsetstestets
+# replace False to True for tensorrt trasformation
 ONNX_EXPORT = False
 
 def create_modules(module_defs, img_size, arc):
@@ -113,23 +113,6 @@ def create_modules(module_defs, img_size, arc):
         output_filters.append(filters)
 
     return module_list, routs
-
-'''
-
-yolov3 output size :
-torch.size([1, 27, 8, 13])
-torch.Size([1, 27, 16, 26])
-torch.Size([1, 27, 32, 52])
-
-lw_yolo output size  : 
-torch.size([1, 27, 8, 13])
-torch.Size([1, 27, 16, 26])
-torch.Size([1, 27, 16, 26])
-
-
-'''
-
-
 
 
 class SwishImplementation(torch.autograd.Function):
@@ -296,9 +279,7 @@ class Darknet(nn.Module):
         self.seen = np.array([0], dtype=np.int64)  # (int64) number of images seen during training
 
     def forward(self, x):
-        # x shape -> [1, 3, 256, 416]
         img_size = x.shape[-2:]
-        # img_size => (256, 416) ?
 
         layer_outputs = []
         output = []
@@ -321,10 +302,7 @@ class Darknet(nn.Module):
             elif mtype == 'shortcut':
                 x = x + layer_outputs[int(mdef['from'])]
             elif mtype == 'yolo':
-                '''
-                imgsize -> 256, 416
-                x shape => [1,27,8,13]
-                '''
+
                 x = module(x, img_size)
                 output.append(x)
             layer_outputs.append(x if i in self.routs else [])
