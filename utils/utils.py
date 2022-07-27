@@ -70,6 +70,13 @@ def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
     # index = random.choices(range(n), weights=image_weights, k=1)  # weight image sample
     return image_weights
 
+def createFolder(directory):
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+        except OSError:
+            print('Error: creating directory')
+
 
 def coco_class_weights():  # frequency of each class in coco train2014
     n = [187437, 4955, 30920, 6033, 3838, 4332, 3160, 7051, 7677, 9167, 1316, 1372, 833, 6757, 7355, 3302, 3776, 4671,

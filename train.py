@@ -10,13 +10,6 @@ from models import *
 from utils.datasets import *
 from utils.utils import *
 
-mixed_precision = True
-try:  # Mixed precision training https://github.com/NVIDIA/apex
-    from apex import amp
-except:
-    mixed_precision = False  # not installed
-
-
 
 
 hyp = {'giou': 3.54,  # giou loss gain
@@ -46,14 +39,18 @@ if f:
         hyp[k] = v
 
 
-def train(args,model_cfg, device, tb_writer, path):
+def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     wdir =  os.path.join(path.model_save_path, args.domain)
+    createFolder(wdir)
     last = wdir + 'last.pt'
     best = wdir + 'best.pt'
     results_file = 'results.txt'
 
     cfg = model_cfg
     img_size = args.img_size
+
+
+
 
     epochs = 1 if args.prebias else args.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
     batch_size = args.batch_size
@@ -181,8 +178,11 @@ def train(args,model_cfg, device, tb_writer, path):
 
     # Mixed precision training https://github.com/NVIDIA/apex
     if mixed_precision:
-        model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
-
+        try:
+            from apex import amp
+            model, optimizer = amp.initialize(model, optimizer, opt_level='O1', verbosity=0)
+        except:
+            print('mixed precision error')
     # Initialize distributed training
     if device.type != 'cpu' and torch.cuda.device_count() > 1:
         dist.init_process_group(backend='nccl',  # 'distributed backend'
@@ -426,6 +426,7 @@ def train_model(args, model_cfg, path):
     wdir = os.path.join(path.model_save_path, args.domain)
     last = wdir + 'last.pt'
     args.weights = last if args.resume else args.weights
+    createFolder(wdir)
 
     mixed_precision = True
     try:  # Mixed precision training https://github.com/NVIDIA/apex
@@ -438,6 +439,7 @@ def train_model(args, model_cfg, path):
     if device.type == 'cpu':
         mixed_precision = False
 
+
     # scale hyp['obj'] by img_size (evolved at 416)
     hyp['obj'] *= args.img_size / 416.
 
@@ -449,7 +451,7 @@ def train_model(args, model_cfg, path):
         except:
             pass
         prebias(args,model_cfg, device, tb_writer, path)  # optional
-        train(args,model_cfg, device, tb_writer, path)  # train normally
+        train(args,model_cfg, device, tb_writer, path, mixed_precision)  # train normally
 
     else:  # Evolve hyperparameters (optional)
         args.notest = True  # only test final epoch
@@ -488,7 +490,7 @@ def train_model(args, model_cfg, path):
 
             # Train mutation
             prebias(args, model_cfg, device, tb_writer, path)  # optional
-            results = train(args, model_cfg, device, tb_writer, path)
+            results = train(args, model_cfg, device, tb_writer, path,mixed_precision)
 
             # Write mutation results
             print_mutation(hyp, results, args.bucket)
