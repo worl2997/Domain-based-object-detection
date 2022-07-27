@@ -42,20 +42,23 @@ if f:
 def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     wdir =  os.path.join(path.model_save_path, args.domain)
     createFolder(wdir)
-    last = wdir + 'last.pt'
-    best = wdir + 'best.pt'
-    results_file = 'results.txt'
+    # last = wdir + 'last.pt'
+    # best = wdir + 'best.pt'
+    # results_file = 'results.txt'
 
     cfg = model_cfg
     img_size = args.img_size
 
+    last = os.path.join(wdir, args.domain + str(args.classes) + '_'+ args.model + '_last.pt')
+    best = os.path.join(wdir, args.domain + str(args.classes)+ '_'+ args.model + '_best.pt')
+    results_file = os.path.join(wdir, args.domain + str(args.classes)+'_'+ args.model + '_results.txt')
 
-
+    args.weights = last if args.resume else args.weights
 
     epochs = 1 if args.prebias else args.epochs  # 500200 batches at bs 64, 117263 images = 273 epochs
     batch_size = args.batch_size
     accumulate = args.accumulate  # effective bs = batch_size * accumulate = 16 * 4 = 64
-    weights = args.weights  # initial training weights
+    weights = last if args.resume else args.weights  # initial training weights
     data = os.path.join(path.DATA_FILE_DIR, args.domain + '.data')  # args.data
     data_dict = parse_data_cfg(data)
 
@@ -379,7 +382,9 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
 
             # Save backup every 10 epochs (optional)
             if epoch > 0 and epoch % 10 == 0:
-                torch.save(chkpt, wdir + 'backup%g.pt' % epoch)
+                wdir = os.path.join(wdir,'backup')
+                os.makedirs((wdir))
+                torch.save(chkpt, os.path.join(wdir, args.domain + str(args.classes)+ '_'+ args.model + 'backup%g.pt' % epoch))
 
             # Delete checkpoint
             del chkpt
@@ -423,10 +428,6 @@ def prebias(args,model_cfg, device, tb_writer, path):
 
 
 def train_model(args, model_cfg, path):
-    wdir = os.path.join(path.model_save_path, args.domain)
-    last = wdir + 'last.pt'
-    args.weights = last if args.resume else args.weights
-    createFolder(wdir)
 
     mixed_precision = True
     try:  # Mixed precision training https://github.com/NVIDIA/apex
