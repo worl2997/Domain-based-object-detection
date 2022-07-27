@@ -27,7 +27,7 @@ cityscape
 
 기존의 cityscapes 데이터 셋은 아래 그림과 같은 클래스 그룹을 지원한다. 하지만 명시된 클래스는 segmentation 작업을 위해 지정된 클래스이므로 object detection에는 적합하지 않다. 본 프로젝트에서 제공한 코드는 임의로 크게 4가지 클래스를 지정하여 다음과 같이 구성한다.
 
-![cityscapes_classes](/readme/cityscapes_classes.PNG)  
+![cityscapes_classes]("/readme/cityscapes_classes.PNG")  
 **[ Cityscapes object detection dataset class 목록]**
 
 `['person'**,** 'rider']` ⇒ ‘person’  
