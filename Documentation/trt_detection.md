@@ -8,4 +8,4 @@ python trt_detection.py --model Highway_lw_yolo_4.engine --name_file data/custom
 
 ### [실행 결과]
 
-![trt_detection_result](../readme/trt_detection.PNG)  
+![trt_detection_result](../readme/trt_detection.png)  
