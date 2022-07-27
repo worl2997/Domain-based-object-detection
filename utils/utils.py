@@ -379,7 +379,7 @@ def compute_loss(p, targets, model):  # predictions, targets, model
             #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
 
         if 'default' in arc:  # separate obj and cls
-            lobj += BCEobj(pi[..., 4], tobj)  # obj loss
+            lobj += BCEobj(pi[..., 4], tobj)  # obj loss:
 
         elif 'BCE' in arc:  # unified BCE (80 classes)
             t = torch.zeros_like(pi[..., 5:])  # targets

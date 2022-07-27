@@ -438,7 +438,6 @@ layers = -3
 [upsample]
 stride = 2
 
-
 #20
 [convolutional]
 batch_normalize=1
