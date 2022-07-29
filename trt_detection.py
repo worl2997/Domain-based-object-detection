@@ -4,7 +4,7 @@ import argparse
 import cv2
 import pycuda.autoinit
 
-from detection_tools.display_utils import open_window, set_display
+from detection_tools.display_utils import open_window, set_display, show_fps
 from detection_tools.detect_uilts import add_camera_args, Detect
 from detection_tools.utils import *
 from detection_tools.trt_yolo_plugin import Trt_yolo
@@ -71,14 +71,15 @@ def loop_and_detect(cam, trt_yolo, conf_th, nms_th, class_list):
                 for *xyxy, conf, cls in det:
                     label = '%s %.2f' % (class_list[int(cls)], conf)
                     plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
-        cv2.imshow(WINDOW_NAME, im0)
 
+        im0 = show_fps(im0, fps) # fps 표시
+        cv2.imshow(WINDOW_NAME, im0)
         toc = time.time()
         curr_fps = 1.0 / (toc - tic)
-        # calculate an exponentially decaying average of fps number
         fps = curr_fps if fps == 0.0 else (fps*0.95 + curr_fps*0.05)
-
         tic = toc
+
+
         key = cv2.waitKey(1)
         if key == 27: # Esc키로 quit
             break
