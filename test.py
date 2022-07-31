@@ -41,7 +41,7 @@ def test(cfg,
             model = nn.DataParallel(model)
     else:  # called by train.py
         device = next(model.parameters()).device  # get model device
-        verbose = False
+        verbose = True
 
     # Configure run
 
@@ -178,6 +178,7 @@ def test(cfg,
 
     # Print results per class
     if verbose and nc > 1 and len(stats):
+        print("AP precision for each class... ")
         for i, c in enumerate(ap_class):
             print(pf % (names[c], seen, nt[c], p[i], r[i], ap[i], f1[i]))
 
