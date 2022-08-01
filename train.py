@@ -41,6 +41,8 @@ if f:
 
 def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     wdir =  os.path.join(path.model_save_path, args.domain)
+    backup_wdir = os.path.join(wdir, 'backup')
+    createFolder(backup_wdir)
     createFolder(wdir)
     # last = wdir + 'last.pt'
     # best = wdir + 'best.pt'
@@ -381,10 +383,8 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
                 torch.save(chkpt, best)
 
             # Save backup every 10 epochs (optional)
-            if epoch > 0 and epoch % 10 == 0:
-                wdir = os.path.join(wdir,'backup')
-                os.makedirs((wdir))
-                torch.save(chkpt, os.path.join(wdir, args.domain + str(args.classes)+ '_'+ args.model + 'backup%g.pt' % epoch))
+            if epoch > 0 and epoch % 5 == 0:
+                torch.save(chkpt, os.path.join(backup_wdir, args.domain + str(args.classes)+ '_'+ args.model + '_backup%g.pt' % epoch))
 
             # Delete checkpoint
             del chkpt
