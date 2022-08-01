@@ -410,7 +410,7 @@ def train(args,model_cfg, device, tb_writer, path, mixed_precision):
     return results
 
 
-def prebias(args,model_cfg, device, tb_writer, path):
+def prebias(args,model_cfg, device, tb_writer, path, mixed_precision):
     # trains output bias layers for 1 epoch and creates new backbone
     if args.prebias:
         wdir = os.path.join(path.model_save_path, args.domain)
@@ -419,7 +419,7 @@ def prebias(args,model_cfg, device, tb_writer, path):
         a = args.img_weights  # save settings
         args.img_weights = False  # disable settings
 
-        train(args,model_cfg, device, tb_writer, path)  # transfer-learn yolo biases for 1 epoch
+        train(args,model_cfg, device, tb_writer, path,mixed_precision)  # transfer-learn yolo biases for 1 epoch
         create_backbone(last)  # saved results as backbone.pt
 
         args.weights = wdir + 'backbone.pt'  # assign backbone
@@ -433,6 +433,7 @@ def train_model(args, model_cfg, path):
     try:  # Mixed precision training https://github.com/NVIDIA/apex
         from apex import amp
     except:
+        print('mixed precision is not adapted..')
         mixed_precision = False  # not installed
 
     tb_writer = None
@@ -451,7 +452,7 @@ def train_model(args, model_cfg, path):
             tb_writer = SummaryWriter()
         except:
             pass
-        prebias(args,model_cfg, device, tb_writer, path)  # optional
+        prebias(args,model_cfg, device, tb_writer, path,mixed_precision)  # optional
         train(args,model_cfg, device, tb_writer, path, mixed_precision)  # train normally
 
     else:  # Evolve hyperparameters (optional)
