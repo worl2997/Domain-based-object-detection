@@ -163,7 +163,7 @@ Park Person
 - --yes : 초기에 데이터를 다운로드 받는데 필요한 의존성 파일을 다운로드 하는데 동의하는 명령어
 
 ```bash
-$ python main.py downloader --dm_list domains.txt --limit 10000 --yes
+$ python main.py downloader --dm_list domains.txt --limit 7000 --yes
 ```
 
 위 domains.txt 예시를 기반으로 download 명령어를 실행하고 난 후 프로젝트의 data 디렉토리에 다음과 같이 데이터가 생성된다 
@@ -248,7 +248,7 @@ weights
 - --device : 학습을 수행할 장치 지정 (ex: `0 or 0,1 or cpu` )
 
 ```bash
-$ python main.py train --model yolov3 --domain Park --classes 1 --epochs 200 --weights weights/darknet53.conv74 --batch-size 8 --nosave --device 0
+$ python main.py train --model yolov3 --domain Park --classes 1 --epochs 200 --weights --batch-size 8 --nosave --device 0
 ```
 
 위 명령어를 실행할 경우 다운로드한 커스텀 데이터에 대한 model cfg 파일을 생성하고 읽어들여 학습할 모델을 로드한다.  생성된 커스텀 모델 cfg 파일은 다음과 같은 디렉토리에 저장된다 .
